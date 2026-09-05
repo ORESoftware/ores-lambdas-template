@@ -1,0 +1,27 @@
+# Google Cloud Run (Cloud Run functions do not support Rust; the container *is* the function).
+# Image comes from the shared images workflow (ores-gha-workflows): <region>-docker.pkg.dev/<gcp-project>/__ORG__/__PREFIX__-lambdas
+#   gcloud run services replace deploy/gcp/service.yaml --region us-central1 --project __GCP_PROJECT__
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: __PREFIX__-lambdas
+  annotations:
+    run.googleapis.com/ingress: internal-and-cloud-load-balancing
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "20"
+        run.googleapis.com/cpu-throttling: "true"
+        run.googleapis.com/startup-cpu-boost: "true"
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 30
+      containers:
+        - image: us-central1-docker.pkg.dev/__GCP_PROJECT__/__ORG__/__PREFIX__-lambdas:main
+          args: ["worker-http"]
+          ports: [{ containerPort: 8080 }]
+          resources: { limits: { cpu: "1", memory: 256Mi } }
+          startupProbe: { httpGet: { path: /healthz, port: 8080 }, periodSeconds: 1, failureThreshold: 30 }
+          livenessProbe: { httpGet: { path: /healthz, port: 8080 } }

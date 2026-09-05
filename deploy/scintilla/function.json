@@ -1,0 +1,11 @@
+{
+  "name": "__PREFIX__-lambdas",
+  "runtime": "oci",
+  "image": "ghcr.io/__ORG__/__PREFIX__-lambdas:main",
+  "entry": ["worker-http"],
+  "env": { "SCINTILLA_FUNCTION": "__PREFIX__-lambdas" },
+  "http": { "port": 8080, "healthz": "/healthz", "readyz": "/readyz" },
+  "bindings": [{ "type": "http", "route": "/invoke" }],
+  "concurrency": { "perReplica": 32 },
+  "retry": { "maxAttempts": 3, "backoff": "exponential" }
+}

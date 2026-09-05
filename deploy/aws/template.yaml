@@ -1,0 +1,45 @@
+# AWS SAM: provided.al2023 on arm64 (default) and x86_64, built with cargo-lambda.
+#   sam build && sam deploy --guided        (or: cargo lambda build --release --arm64 && cargo lambda deploy)
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: __PREFIX__-lambdas — provider-neutral workers (AWS adapter)
+Globals:
+  Function:
+    Runtime: provided.al2023
+    Architectures: [arm64]
+    MemorySize: 256
+    Timeout: 15
+    Tracing: Active
+    Environment:
+      Variables:
+        RUST_LOG: info
+Resources:
+  Worker:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: rust-cargolambda
+      BuildProperties: { Binary: worker-aws, Features: aws }
+    Properties:
+      Handler: bootstrap
+      CodeUri: ../../
+      # Async invokes retry twice then land in the DLQ; the receipt-not-panic contract keeps retries idempotent.
+      EventInvokeConfig:
+        MaximumRetryAttempts: 2
+        DestinationConfig:
+          OnFailure: { Type: SQS, Destination: !GetAtt DeadLetter.Arn }
+  Health:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: rust-cargolambda
+      BuildProperties: { Binary: health, Features: aws }
+    Properties:
+      Handler: bootstrap
+      CodeUri: ../../
+      Events:
+        Http: { Type: HttpApi, Properties: { Path: /healthz, Method: GET } }
+  DeadLetter:
+    Type: AWS::SQS::Queue
+    Properties: { MessageRetentionPeriod: 1209600 }
+Outputs:
+  WorkerArn: { Value: !GetAtt Worker.Arn }
+  HealthUrl: { Value: !Sub "https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com/healthz" }

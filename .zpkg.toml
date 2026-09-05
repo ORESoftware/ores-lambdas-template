@@ -1,0 +1,26 @@
+[package]
+org = "__ORG__"
+name = "__PREFIX__-lambdas"
+version = "0.1.0"
+description = "Provider-neutral serverless functions for __ORG__"
+license = "MIT"
+language = "rust"
+kind = "rust-lambdas"
+
+[package.repository]
+vcs = "git"
+url = "https://github.com/__ORG__/__PREFIX__-lambdas"
+
+[dependencies]
+"flags-2-env/flags-2-env" = "^0.1.0"
+
+[build]
+command = "cargo build --release --features http,portable"
+
+[scripts]
+test = "cargo test --features http,portable,aws --all-targets"
+
+[publish]
+include_readme = true
+tag_format = "v{version}"
+exclude = [".env", ".env.*", "target/**", "**/*.log", ".vendor/**"]

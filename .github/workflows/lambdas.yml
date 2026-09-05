@@ -1,0 +1,38 @@
+name: lambdas
+on: { push: { branches: [main] }, pull_request: {} }
+permissions: { contents: read, packages: write, id-token: write }
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --features http,portable,aws --all-targets
+      - run: cargo clippy --features http,portable,aws --all-targets -- -D warnings
+  aws-artifacts:
+    needs: test
+    strategy: { matrix: { arch: [arm64, x86-64] } }
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: pip install cargo-lambda
+      - run: cargo lambda build --release --${{ matrix.arch == 'arm64' && 'arm64' || 'x86-64' }} --features aws --bin worker-aws --bin health --output-format zip
+      - name: release manifest (source sha, arch, adapter, runtime, checksum, toolchain)
+        run: |
+          for b in worker-aws health; do
+            z=target/lambda/$b/bootstrap.zip
+            printf '{"source":"%s","arch":"%s","adapter":"aws","runtime":"provided.al2023","binary":"%s","sha256":"%s","toolchain":"%s"}\n' "$GITHUB_SHA" "${{ matrix.arch }}" "$b" "$(sha256sum $z | cut -d' ' -f1)" "$(rustc -V)" >> target/lambda/manifest.jsonl
+          done
+      - uses: actions/upload-artifact@v4
+        with: { name: aws-${{ matrix.arch }}, path: target/lambda/ }
+  images:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    uses: ORESoftware/ores-gha-workflows/.github/workflows/container-images.yml@main
+    with: { image-name: __ORG__/__PREFIX__-lambdas, gcp-project: __GCP_PROJECT__, dockerhub-namespace: oresoftware }
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}

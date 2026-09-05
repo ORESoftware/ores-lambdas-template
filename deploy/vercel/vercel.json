@@ -1,0 +1,5 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": { "api/**/*.rs": { "runtime": "@vercel/rust@4" } },
+  "rewrites": [{ "source": "/invoke", "destination": "/api/invoke" }]
+}
