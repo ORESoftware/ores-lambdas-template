@@ -158,6 +158,8 @@ jobs:
     needs: test
     permissions:
       contents: read
+      packages: write
+      id-token: write
     uses: ORESoftware/ores-gha-workflows/.github/workflows/container-images.yml@09317aaf8f89a58b9ee87755db4daa2b242d6cb2
     with:
       image-name: ${{ github.repository == 'ORESoftware/ores-lambdas-template' && 'oresoftware/ores-lambdas-template' || '__ORG__/__PREFIX__-lambdas' }}
