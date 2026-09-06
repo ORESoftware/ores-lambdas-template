@@ -6,6 +6,19 @@ here=$(cd "$(dirname "$0")/.." && pwd); dest="$HOME/codes/$org/$prefix-lambdas"
 [ -e "$dest" ] && { echo "exists: $dest"; exit 1; }
 mkdir -p "$dest"; (cd "$here" && tar cf - --exclude=.git --exclude=target --exclude=scripts . ) | (cd "$dest" && tar xf -)
 crate=$(echo "$prefix" | tr '-' '_')_lambdas
-find "$dest" -type f \( -name '*.rs' -o -name '*.toml' -o -name '*.md' -o -name '*.json' -o -name '*.yaml' -o -name '*.yml' -o -name 'Dockerfile' \) -print0 | xargs -0 sed -i.bak -e "s/__ORG__/$org/g" -e "s/__PREFIX__/$prefix/g" -e "s/__CRATE__/$crate/g" -e "s/__GCP_PROJECT__/${gcp:-$org}/g"
+find "$dest" -type f \( \
+  -name '*.rs' -o \
+  -name '*.toml' -o \
+  -name '*.md' -o \
+  -name '*.json' -o \
+  -name '*.yaml' -o \
+  -name '*.yml' -o \
+  -name 'Cargo.lock' -o \
+  -name 'Dockerfile' \
+\) -print0 | xargs -0 sed -i.bak \
+  -e "s/__ORG__/$org/g" \
+  -e "s/__PREFIX__/$prefix/g" \
+  -e "s/__CRATE__/$crate/g" \
+  -e "s/__GCP_PROJECT__/${gcp:-$org}/g"
 find "$dest" -name '*.bak' -delete
 echo "scaffolded $dest (crate $crate)"

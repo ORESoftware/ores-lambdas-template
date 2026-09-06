@@ -111,7 +111,13 @@ pub fn validate(inv: &Invocation) -> Result<(), RejectReason> {
     if inv.command.schema_version != SCHEMA_VERSION {
         return Err(RejectReason::UnsupportedSchema);
     }
-    if inv.request_id.is_empty() || inv.request_id.len() > MAX_ID_LEN || !inv.request_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b':' || b == b'.') {
+    if inv.request_id.is_empty()
+        || inv.request_id.len() > MAX_ID_LEN
+        || !inv
+            .request_id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b':' || b == b'.')
+    {
         return Err(RejectReason::UnboundedIdentifier);
     }
     Ok(())
@@ -129,7 +135,14 @@ pub fn dispatch(inv: &Invocation) -> Receipt {
         }),
         Operation::Echo => Value::Object(inv.command.payload.clone()),
     };
-    Receipt { request_id: inv.request_id.clone(), provider: inv.provider, ok: true, operation: Some(inv.command.operation), result: Some(result), error: None }
+    Receipt {
+        request_id: inv.request_id.clone(),
+        provider: inv.provider,
+        ok: true,
+        operation: Some(inv.command.operation),
+        result: Some(result),
+        error: None,
+    }
 }
 
 /// Parse + dispatch, producing a receipt either way. `provider` and `request_id` are the
@@ -143,7 +156,10 @@ pub fn handle(raw: &[u8], provider: Provider, fallback_request_id: &str) -> Rece
             ok: false,
             operation: None,
             result: None,
-            error: Some(ErrorReceipt { code: reason.code(), message: reason.message() }),
+            error: Some(ErrorReceipt {
+                code: reason.code(),
+                message: reason.message(),
+            }),
         },
     }
 }
@@ -153,7 +169,9 @@ mod tests {
     use super::*;
 
     fn envelope(op: &str) -> String {
-        format!(r#"{{"provider":"local","requestId":"t-1","command":{{"schemaVersion":"{SCHEMA_VERSION}","operation":"{op}","payload":{{"a":1}}}}}}"#)
+        format!(
+            r#"{{"provider":"local","requestId":"t-1","command":{{"schemaVersion":"{SCHEMA_VERSION}","operation":"{op}","payload":{{"a":1}}}}}}"#
+        )
     }
 
     #[test]
@@ -169,18 +187,54 @@ mod tests {
     #[test]
     fn rejects_fail_closed_with_fixed_messages() {
         let big = vec![b' '; MAX_INVOCATION_BYTES + 1];
-        assert_eq!(handle(&big, Provider::AwsLambda, "req").error.unwrap().code, "invocation_too_large");
-        assert_eq!(handle(b"{", Provider::AwsLambda, "req").error.unwrap().code, "invalid_invocation");
+        assert_eq!(
+            handle(&big, Provider::AwsLambda, "req").error.unwrap().code,
+            "invocation_too_large"
+        );
+        assert_eq!(
+            handle(b"{", Provider::AwsLambda, "req").error.unwrap().code,
+            "invalid_invocation"
+        );
         let unknown_field = envelope("health").replace(r#""payload""#, r#""extra":1,"payload""#);
-        assert_eq!(handle(unknown_field.as_bytes(), Provider::Local, "req").error.unwrap().code, "invalid_invocation");
+        assert_eq!(
+            handle(unknown_field.as_bytes(), Provider::Local, "req")
+                .error
+                .unwrap()
+                .code,
+            "invalid_invocation"
+        );
         let bad_schema = envelope("health").replace(SCHEMA_VERSION, "v0");
-        assert_eq!(handle(bad_schema.as_bytes(), Provider::Local, "req").error.unwrap().code, "unsupported_schema_version");
+        assert_eq!(
+            handle(bad_schema.as_bytes(), Provider::Local, "req")
+                .error
+                .unwrap()
+                .code,
+            "unsupported_schema_version"
+        );
         let unknown_op = envelope("reboot");
-        assert_eq!(handle(unknown_op.as_bytes(), Provider::Local, "req").error.unwrap().code, "invalid_invocation");
+        assert_eq!(
+            handle(unknown_op.as_bytes(), Provider::Local, "req")
+                .error
+                .unwrap()
+                .code,
+            "invalid_invocation"
+        );
         let long_id = envelope("health").replace(r#""t-1""#, &format!("\"{}\"", "x".repeat(200)));
-        assert_eq!(handle(long_id.as_bytes(), Provider::Local, "req").error.unwrap().code, "unbounded_identifier");
+        assert_eq!(
+            handle(long_id.as_bytes(), Provider::Local, "req")
+                .error
+                .unwrap()
+                .code,
+            "unbounded_identifier"
+        );
         let scalar_payload = envelope("health").replace(r#"{"a":1}"#, "1");
-        assert_eq!(handle(scalar_payload.as_bytes(), Provider::Local, "req").error.unwrap().code, "invalid_invocation");
+        assert_eq!(
+            handle(scalar_payload.as_bytes(), Provider::Local, "req")
+                .error
+                .unwrap()
+                .code,
+            "invalid_invocation"
+        );
     }
 
     #[test]
