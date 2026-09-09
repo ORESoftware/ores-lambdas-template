@@ -1,0 +1,9 @@
+.git
+.github
+target
+dist
+.typespec-json-schema-validator
+.env
+.env.*
+tmp
+temp

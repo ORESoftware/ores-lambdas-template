@@ -8,6 +8,7 @@ description = "Provider-neutral Rust functions for __ORG__: one bounded command 
 license = "MIT"
 
 [lib]
+name = "__CRATE__"
 path = "src/lib.rs"
 
 [features]
@@ -59,6 +60,8 @@ required-features = ["vercel"]
 
 [lints.rust]
 unsafe_code = "forbid"
+# The raw template uses an uppercase placeholder crate target; scaffold.sh replaces it with a lowercase consumer crate name.
+non_snake_case = "allow"
 
 [lints.clippy]
 all = "deny"

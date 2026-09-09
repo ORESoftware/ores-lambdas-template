@@ -2,3 +2,7 @@ target/
 .vendor/
 .env
 .env.*
+.typespec-json-schema-validator/
+dist/
+tmp/
+temp/

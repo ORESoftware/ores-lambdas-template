@@ -1,14 +1,78 @@
 name: lambdas
 on: { push: { branches: [main] }, pull_request: {} }
 permissions: { contents: read, packages: write, id-token: write }
+
+env:
+  TJSV_REVISION: 03ccc0ecdfc70f9198c3ccf80718910961d3fde1
+
 jobs:
+  contract-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enforce independent TypeSpec and JSON Schema authorities
+        uses: ORESoftware/typespec-json-schema-validator@03ccc0ecdfc70f9198c3ccf80718910961d3fde1
+        with:
+          typespec: schema-authority/main.tsp
+          schema: schema-authority/authored.schema.json
+          report: .typespec-json-schema-validator/report.json
+          output_dir: .typespec-json-schema-validator/generated
+      - name: Retain contract evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-contract-parity
+          path: .typespec-json-schema-validator/
+          if-no-files-found: warn
+
   test:
+    needs: contract-parity
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Keep Docker and OCI build definitions aligned
+        run: cmp -s Dockerfile Containerfile
+      - name: Test container entrypoint contract
+        run: sh scripts/test-entrypoint.sh
       - run: cargo test --features http,portable,aws --all-targets
       - run: cargo clippy --features http,portable,aws --all-targets -- -D warnings
+
+  container-artifacts:
+    needs: test
+    strategy:
+      matrix: { arch: [amd64, arm64] }
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Build target architecture image
+        run: >-
+          docker buildx build
+          --platform linux/${{ matrix.arch }}
+          --build-arg VCS_REF=${{ github.sha }}
+          --tag lambdas-ci:${{ matrix.arch }}
+          --load .
+
+  oci-layout:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Build multi-platform OCI layout
+        run: >-
+          docker buildx build
+          --platform linux/amd64,linux/arm64
+          --build-arg VCS_REF=${{ github.sha }}
+          --output type=oci,dest=/tmp/lambdas.oci .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lambdas-oci-layout
+          path: /tmp/lambdas.oci
+
   aws-artifacts:
     needs: test
     strategy: { matrix: { arch: [arm64, x86-64] } }
@@ -25,9 +89,12 @@ jobs:
             printf '{"source":"%s","arch":"%s","adapter":"aws","runtime":"provided.al2023","binary":"%s","sha256":"%s","toolchain":"%s"}\n' "$GITHUB_SHA" "${{ matrix.arch }}" "$b" "$(sha256sum $z | cut -d' ' -f1)" "$(rustc -V)" >> target/lambda/manifest.jsonl
           done
       - uses: actions/upload-artifact@v4
-        with: { name: aws-${{ matrix.arch }}, path: target/lambda/ }
+        with:
+          name: aws-${{ matrix.arch }}
+          path: target/lambda/
+
   images:
-    needs: test
+    needs: [container-artifacts, oci-layout, aws-artifacts]
     if: github.ref == 'refs/heads/main'
     uses: ORESoftware/ores-gha-workflows/.github/workflows/container-images.yml@main
     with: { image-name: __ORG__/__PREFIX__-lambdas, gcp-project: __GCP_PROJECT__, dockerhub-namespace: oresoftware }
