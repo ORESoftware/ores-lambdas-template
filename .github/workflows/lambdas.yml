@@ -95,7 +95,8 @@ jobs:
 
   images:
     needs: [container-artifacts, oci-layout, aws-artifacts]
-    if: github.ref == 'refs/heads/main'
+    # The unrendered template intentionally contains placeholder coordinates; consumer repos publish after scaffold replacement.
+    if: github.ref == 'refs/heads/main' && github.repository != 'ORESoftware/ores-lambdas-template'
     uses: ORESoftware/ores-gha-workflows/.github/workflows/container-images.yml@main
     with: { image-name: __ORG__/__PREFIX__-lambdas, gcp-project: __GCP_PROJECT__, dockerhub-namespace: oresoftware }
     secrets:
