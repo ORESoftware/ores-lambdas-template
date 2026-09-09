@@ -7,7 +7,11 @@ ARG BINARY=worker-http
 ARG CARGO_FEATURES=http
 WORKDIR /src
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates gcc-aarch64-linux-gnu gcc-x86-64-linux-gnu \
+    && apt-get install -y --no-install-recommends \
+      ca-certificates \
+      gcc-aarch64-linux-gnu \
+      gcc-x86-64-linux-gnu \
+      libc6-dev-arm64-cross \
     && rm -rf /var/lib/apt/lists/*
 COPY . .
 RUN set -eux; \
