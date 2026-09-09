@@ -1,7 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # One multi-stage definition produces Docker-compatible images or OCI layouts.
-ARG BUILDPLATFORM
-ARG TARGETPLATFORM
+# BUILDPLATFORM/TARGETPLATFORM are BuildKit automatic global args; do not redeclare them empty.
 FROM --platform=$BUILDPLATFORM rust:1.88-bookworm AS builder
 ARG TARGETARCH
 ARG BINARY=worker-http
