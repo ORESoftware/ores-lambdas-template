@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ores.lambda-runtime.v1.schema.json",
+  "$defs": {
+    "Provider": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "Provider",
+      "type": "string",
+      "enum": [
+        "aws-lambda",
+        "gcp-cloud-run",
+        "azure-functions",
+        "vercel",
+        "cloudflare-workers",
+        "scintilla",
+        "local"
+      ]
+    },
+    "Operation": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "Operation",
+      "type": "string",
+      "enum": ["health", "version", "echo"]
+    }
+  }
+}
