@@ -89,7 +89,9 @@ jobs:
             printf '{"source":"%s","arch":"%s","adapter":"aws","runtime":"provided.al2023","binary":"%s","sha256":"%s","toolchain":"%s"}\n' "$GITHUB_SHA" "${{ matrix.arch }}" "$b" "$(sha256sum $z | cut -d' ' -f1)" "$(rustc -V)" >> target/lambda/manifest.jsonl
           done
       - uses: actions/upload-artifact@v4
-        with: { name: aws-${{ matrix.arch }}, path: target/lambda/ }
+        with:
+          name: aws-${{ matrix.arch }}
+          path: target/lambda/
 
   images:
     needs: [container-artifacts, oci-layout, aws-artifacts]
