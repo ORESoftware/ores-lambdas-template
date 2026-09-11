@@ -49,6 +49,7 @@ test ! -e "$conflict/.auth-shared.toml"
 
 # Every catalogued-but-unadmitted concern remains fail-closed.
 blocked="$tmp-blocked"
+mkdir -p "$blocked"
 cp -R "$repo/config" "$blocked/config"
 cp "$repo/.ores-otel.toml" "$blocked/.ores-otel.toml"
 for concern in redis-lru forms opto-sync legal wasm rpc fanwaave indiebuild sidecar; do
@@ -65,6 +66,7 @@ find "$blocked" -maxdepth 1 -type f ! -name '.ores-otel.toml' -print | grep -q .
 # Preflight the entire comma-list before writing anything. A valid first item
 # must not be left behind when a later item is blocked or unknown.
 invalid="$tmp-invalid"
+mkdir -p "$invalid"
 cp -R "$repo/config" "$invalid/config"
 cp "$repo/.ores-otel.toml" "$invalid/.ores-otel.toml"
 if sh "$repo/scripts/enable-concern.sh" "$invalid" "middleware,forms"; then
@@ -80,6 +82,7 @@ test ! -e "$invalid/.ores-chat.toml"
 
 # Duplicate and empty requests are configuration mistakes, not no-ops.
 duplicate="$tmp-duplicate"
+mkdir -p "$duplicate"
 cp -R "$repo/config" "$duplicate/config"
 cp "$repo/.ores-otel.toml" "$duplicate/.ores-otel.toml"
 if sh "$repo/scripts/enable-concern.sh" "$duplicate" "chat,chat"; then
@@ -89,6 +92,7 @@ fi
 test ! -e "$duplicate/.ores-chat.toml"
 
 empty="$tmp-empty"
+mkdir -p "$empty"
 cp -R "$repo/config" "$empty/config"
 cp "$repo/.ores-otel.toml" "$empty/.ores-otel.toml"
 if sh "$repo/scripts/enable-concern.sh" "$empty" ", ,"; then
