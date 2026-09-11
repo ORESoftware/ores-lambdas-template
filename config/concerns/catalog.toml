@@ -12,6 +12,7 @@ template = ""
 id = "middleware"
 canonical_file = ".ores-mw.toml"
 owner = "https://github.com/ORESoftware/ores-middleware"
+source_revision = "91a054a0c3c7a49e2b2a2346cbbc5c9a85523dfd"
 mode = "optional"
 template = "config/concerns/templates/ores-mw.toml"
 
@@ -19,21 +20,30 @@ template = "config/concerns/templates/ores-mw.toml"
 id = "rate-limit"
 canonical_file = ".ores-rl.toml"
 owner = "https://github.com/ores-rate-limit/ores-rl-lib-core"
+source_revision = "47c207d71de00e6624e66dfc64c33fe0e40b9113"
 mode = "optional"
 template = "config/concerns/templates/ores-rl.toml"
+tjsv_required = true
+typespec = "contracts/authorities/typespec/rate-limit-config.v1.tsp"
+json_schema = "contracts/authorities/json-schema/rate-limit-config.v1.schema.json"
 
 [[concerns]]
 id = "chat"
 canonical_file = ".ores-chat.toml"
 owner = "https://github.com/ores-chat/ores-chat-interfaces"
+source_revision = "217bcd221bcc914629e59f9ad87e300abf5501fc"
 mode = "optional"
 template = "config/concerns/templates/ores-chat.toml"
+tjsv_required = true
+typespec = "contracts/ores-chat-config/ores-chat-config.tsp"
+json_schema = "contracts/ores-chat-config/ores-chat-config.schema.json"
 
 [[concerns]]
 id = "shared-auth"
 canonical_file = ".shared-auth.toml"
 aliases = [".auth-shared.toml"]
 owner = "https://github.com/shared-auth/shared-auth-interfaces"
+source_revision = "52b7ac7fbf0c7c169684f613eda923f3aa6c82e9"
 mode = "optional"
 template = "config/concerns/templates/shared-auth.toml"
 
