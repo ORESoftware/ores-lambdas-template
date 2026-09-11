@@ -3,13 +3,19 @@
 mod runtime;
 
 fn schema_enum(name: &str) -> Vec<String> {
-    let schema: serde_json::Value = serde_json::from_str(include_str!("../schema-authority/authored.schema.json"))
-        .expect("authored lambda JSON Schema must parse");
+    let schema: serde_json::Value =
+        serde_json::from_str(include_str!("../schema-authority/authored.schema.json"))
+            .expect("authored lambda JSON Schema must parse");
     schema["$defs"][name]["enum"]
         .as_array()
         .unwrap_or_else(|| panic!("missing enum contract for {name}"))
         .iter()
-        .map(|value| value.as_str().expect("enum values must be strings").to_owned())
+        .map(|value| {
+            value
+                .as_str()
+                .expect("enum values must be strings")
+                .to_owned()
+        })
         .collect()
 }
 
