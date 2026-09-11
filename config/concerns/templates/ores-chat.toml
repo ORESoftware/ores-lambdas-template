@@ -1,0 +1,32 @@
+# Derived from ores-chat/ores-chat-api-server.rs/.ores-chat.toml.
+# The owner authority is ores-chat/ores-chat-interfaces/contracts/ores-chat-config.
+version = 1
+mode = "server"
+strict = true
+
+[flags2env]
+contract = ".cli-flags.toml"
+require_audit = true
+precedence = "argv-over-env"
+
+[[env]]
+name = "bind_addr"
+key = "ORES_CHAT_BIND"
+kind = "string"
+required = false
+secret = false
+default = "127.0.0.1:8080"
+description = "Customer API listen address."
+
+[[env]]
+name = "shared_auth_issuer"
+key = "SHARED_AUTH_ISSUER"
+kind = "url"
+required = true
+secret = false
+description = "Customer-realm Shared Auth issuer used by identity verification."
+
+[server]
+enabled = true
+bind_addr_binding = "bind_addr"
+shared_auth_issuer_binding = "shared_auth_issuer"

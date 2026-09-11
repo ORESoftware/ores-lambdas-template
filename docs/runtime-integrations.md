@@ -14,19 +14,33 @@ This template is a provider-neutral function shell. Generated repositories shoul
 
 Only render a concern file when the generated lambda actually uses that concern. The file selects/configures an admitted implementation; it is not permission to duplicate its parser or business rules.
 
+`config/concerns/catalog.toml` is the machine-readable inventory. An entry is materializable only after an owner-defined schema/example has been reviewed. `owner-schema-required` entries are intentionally recognized but blocked: the template will not invent their semantics.
+
 | Root file | Owner | Lambda use |
 | --- | --- | --- |
 | `.ores-mw.toml` | `ORESoftware/ores-middleware` | HTTP/RPC middleware ordering, propagation, target/role selection. |
 | `.ores-rl.toml` | `ores-rate-limit` | Rate-limit algorithm/backend policy. Secret Redis/HMAC values remain environment-only. |
 | `.ores-lru.toml` | `ores-redis-lru-cache` | Local/Redis cache namespace, reconciliation and Pub/Sub policy. Cache credentials remain environment-only. |
-| `.auth-shared.toml` | `shared-auth` compatibility surface | Authentication/authorization bindings. Never coexist with another Shared Auth root filename. |
-| `.ores-chat.toml` | `ores-chat` | Chat-specific function configuration and environment-key bindings. |
+| `.shared-auth.toml` | `shared-auth/shared-auth-interfaces` | Canonical authentication/authorization policy. |
+| `.auth-shared.toml` | Shared Auth compatibility alias | Supported only as an explicit migration/compatibility name; never coexist with `.shared-auth.toml`. |
+| `.ores-chat.toml` | `ores-chat/ores-chat-interfaces` | Chat-specific function configuration and environment-key bindings. |
 | `.ores-forms.toml` | `ores-forms` | Forms-specific function configuration and environment-key bindings. |
 | `.opto-sync.toml` | `opto-sync` | Offline/synchronization policy used by functions that participate in sync flows. |
 | `.ores-legal.toml` | `ores-legal` | Legal/document-signing domain policy and environment-key bindings. |
 | `.ores-wasm.toml` | `ores-wasm-loaders` | WASM loader/runtime policy where a function intentionally loads admitted modules. |
 | `.ores-rpc.toml` | `ORESoftware/api-docs` RPC surface | RPC target, transport/framing and contract references. |
 | `.fanwaave-cfg.toml` | `fanwaave` | Fanwaave domain/runtime policy when used. |
+
+Today the template carries reviewed materializers for middleware, rate-limit, chat, and Shared Auth. The other optional names remain catalogued but fail closed until their owning repository publishes/admits the contract used by this template.
+
+To scaffold only the concerns a repository actually needs:
+
+```sh
+ORES_LAMBDA_CONCERNS=middleware,rate-limit,chat,shared-auth \
+  scripts/scaffold.sh acme payments my-gcp-project
+```
+
+The normal Shared Auth selector writes `.shared-auth.toml`. `shared-auth-compat` writes the supported `.auth-shared.toml` alias for a repository that intentionally remains on that filename. Asking for both is an error.
 
 A generated lambda must not add a second argv parser inside any concern. Startup order is:
 

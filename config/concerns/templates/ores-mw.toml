@@ -1,0 +1,11 @@
+# Derived from ORESoftware/ores-middleware/.ores-mw.toml.
+schema_version = 1
+repository_mode = "server-only"
+default_target = "portable-adapters"
+
+[[targets]]
+name = "portable-adapters"
+role = "server"
+roots = ["src"]
+middleware = "stack"
+stack_config = "contracts/fixtures/stack.minimal.json"
