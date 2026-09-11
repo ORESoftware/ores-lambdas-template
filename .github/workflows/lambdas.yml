@@ -17,6 +17,7 @@ env:
   TJSV_REVISION: 03ccc0ecdfc70f9198c3ccf80718910961d3fde1
   CARGO_LAMBDA_VERSION: 1.9.2
   CARGO_LAMBDA_X86_64_SHA256: b5c258c424ebaef39541c3641f33c51137ee6c426016f365628fedb2c737271d
+  ZIG_VERSION: 0.16.0
 
 jobs:
   runtime-config-contract:
@@ -214,6 +215,13 @@ jobs:
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
         with:
           toolchain: "1.88"
+      - name: Install pinned Zig cross toolchain
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: Verify Zig version
+        shell: bash
+        run: test "$(zig version)" = "${ZIG_VERSION}"
       - name: Install checksum-pinned Cargo Lambda
         shell: bash
         run: |
