@@ -23,4 +23,4 @@ test = "cargo test --features http,portable,aws --all-targets"
 [publish]
 include_readme = true
 tag_format = "v{version}"
-exclude = [".env", ".env.*", "target/**", "**/*.log", ".vendor/**"]
+exclude = [".env", ".env.*", "env/**", "target/**", "**/*.log", ".vendor/**"]
