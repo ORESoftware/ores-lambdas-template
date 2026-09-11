@@ -7,7 +7,8 @@ trap 'rm -rf "$tmp" "$tmp-compat" "$tmp-conflict" "$tmp-blocked" "$tmp-invalid" 
 
 # Parse the catalog, root TOMLs, and reviewed templates with Rust so the same
 # production-language toolchain that builds Lambda code owns semantic validation.
-cargo test --quiet --manifest-path "$repo/Cargo.toml" --test concern_catalog_contract
+# --locked makes the committed dependency graph part of the contract.
+cargo test --quiet --locked --manifest-path "$repo/Cargo.toml" --test concern_catalog_contract
 
 cp -R "$repo/config" "$tmp/config"
 cp "$repo/.ores-otel.toml" "$tmp/.ores-otel.toml"
