@@ -1,6 +1,6 @@
 //! AWS Lambda adapter: runtime context is authoritative for provider and request id.
 //! Completion builds a fresh envelope rather than mutating or aliasing caller-owned payload state.
-use crate::runtime::{handle, Provider, Receipt};
+use crate::runtime::{handle_bound, Provider, Receipt};
 use lambda_runtime::LambdaEvent;
 use serde_json::{Map, Value};
 
@@ -21,9 +21,11 @@ fn complete_envelope(payload: &Value, request_id: &str) -> Value {
 }
 
 pub fn from_event(event: LambdaEvent<Value>) -> Receipt {
+    // Preserve the functional fresh-value construction from the adapter boundary, then bind the
+    // host context again in the common runtime path so request-id validation/normalization is shared.
     let value = complete_envelope(&event.payload, &event.context.request_id);
     let raw = serde_json::to_vec(&value).unwrap_or_default();
-    handle(&raw, Provider::AwsLambda, &event.context.request_id)
+    handle_bound(&raw, Provider::AwsLambda, &event.context.request_id)
 }
 
 #[cfg(test)]
