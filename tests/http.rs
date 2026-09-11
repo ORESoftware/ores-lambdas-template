@@ -7,9 +7,15 @@ use __CRATE__::adapters::http::{detect_provider, router, HttpConfig};
 use __CRATE__::runtime::{Provider, SCHEMA_VERSION};
 
 fn app() -> axum::Router {
-    router(HttpConfig {
-        provider: Provider::Local,
-    })
+    app_for(Provider::Local)
+}
+
+fn app_for(provider: Provider) -> axum::Router {
+    router(HttpConfig { provider })
+}
+
+async fn json_body(response: axum::response::Response) -> serde_json::Value {
+    serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap()
 }
 
 #[tokio::test]
@@ -32,10 +38,69 @@ async fn probes_and_invoke() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    let body: serde_json::Value =
-        serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    let body = json_body(res).await;
     assert_eq!(body["ok"], true);
+    assert_eq!(body["provider"], "local");
+    assert_eq!(body["requestId"], "http");
     assert_eq!(body["result"]["schemaVersion"], SCHEMA_VERSION);
+}
+
+#[tokio::test]
+async fn platform_metadata_overrides_spoofed_body_metadata() {
+    let res = app_for(Provider::GcpCloudRun)
+        .oneshot(
+            Request::post("/invoke")
+                .header("content-type", "application/json")
+                .header("x-request-id", "generic-spoof")
+                .header("x-cloud-trace-context", "trace-42/span-7;o=1")
+                .body(Body::from(include_str!("fixtures/spoofed-invocation.json")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = json_body(res).await;
+    assert_eq!(body["ok"], true);
+    assert_eq!(body["provider"], "gcp-cloud-run");
+    assert_eq!(body["requestId"], "trace-42");
+    assert_ne!(body["requestId"], "untrusted-body");
+}
+
+#[tokio::test]
+async fn azure_invocation_header_precedes_generic_request_id() {
+    let res = app_for(Provider::AzureFunctions)
+        .oneshot(
+            Request::post("/api/invoke")
+                .header("content-type", "application/json")
+                .header("x-request-id", "generic-spoof")
+                .header("x-azure-functions-invocationid", "azure-42")
+                .body(Body::from(include_str!("fixtures/spoofed-invocation.json")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = json_body(res).await;
+    assert_eq!(body["provider"], "azure-functions");
+    assert_eq!(body["requestId"], "azure-42");
+}
+
+#[tokio::test]
+async fn unsafe_request_id_is_not_reflected() {
+    let res = app()
+        .oneshot(
+            Request::post("/invoke")
+                .header("content-type", "application/json")
+                .header("x-request-id", "bad id with spaces")
+                .body(Body::from(include_str!("fixtures/spoofed-invocation.json")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = json_body(res).await;
+    assert_eq!(body["requestId"], "request");
+    assert!(!body.to_string().contains("bad id with spaces"));
 }
 
 #[tokio::test]
@@ -50,8 +115,7 @@ async fn bad_envelope_is_400_and_request_id_comes_from_header() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
-    let body: serde_json::Value =
-        serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    let body = json_body(res).await;
     assert_eq!(body["requestId"], "trace-42");
     assert_eq!(body["error"]["code"], "invalid_invocation");
 }
