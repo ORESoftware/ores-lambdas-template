@@ -48,9 +48,9 @@ fn malformed_event_fails_closed_with_trusted_context() {
 }
 
 #[test]
-fn unsafe_lambda_request_id_is_not_reflected() {
+fn unsafe_lambda_request_id_is_normalized_and_not_reflected() {
     let receipt = from_event(event(fixture(), "bad id with spaces"));
-    assert!(!receipt.ok);
+    assert!(receipt.ok);
     assert_eq!(receipt.provider, Provider::AwsLambda);
     assert_eq!(receipt.request_id, "request");
     assert!(!serde_json::to_string(&receipt)
