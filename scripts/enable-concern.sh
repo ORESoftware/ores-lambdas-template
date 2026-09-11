@@ -87,7 +87,7 @@ for raw_concern in $requested; do
       }
       preflight_target "$templates/shared-auth.toml" "$root/.auth-shared.toml"
       ;;
-    redis-lru|forms|opto-sync|legal|wasm|rpc|fanwaave)
+    redis-lru|forms|opto-sync|legal|wasm|rpc|fanwaave|indiebuild|sidecar)
       echo "concern '$concern' is catalogued but blocked until its owner schema/example is admitted" >&2
       exit 7
       ;;
