@@ -40,7 +40,11 @@ pub fn router(config: HttpConfig) -> Router {
         .with_state(config)
 }
 
-async fn invoke(State(config): State<HttpConfig>, headers: HeaderMap, body: Bytes) -> (StatusCode, Json<Receipt>) {
+async fn invoke(
+    State(config): State<HttpConfig>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> (StatusCode, Json<Receipt>) {
     let request_id = headers
         .get("x-request-id")
         .or_else(|| headers.get("x-cloud-trace-context"))
@@ -49,6 +53,16 @@ async fn invoke(State(config): State<HttpConfig>, headers: HeaderMap, body: Byte
         .map(|s| s.split('/').next().unwrap_or(s).to_owned())
         .unwrap_or_else(|| "http".to_owned());
     let receipt = handle(&body, config.provider, &request_id);
-    let status = if receipt.ok { StatusCode::OK } else if receipt.error.as_ref().is_some_and(|e| e.code == "invocation_too_large") { StatusCode::PAYLOAD_TOO_LARGE } else { StatusCode::BAD_REQUEST };
+    let status = if receipt.ok {
+        StatusCode::OK
+    } else if receipt
+        .error
+        .as_ref()
+        .is_some_and(|e| e.code == "invocation_too_large")
+    {
+        StatusCode::PAYLOAD_TOO_LARGE
+    } else {
+        StatusCode::BAD_REQUEST
+    };
     (status, Json(receipt))
 }

@@ -11,8 +11,10 @@ pub fn from_event(event: LambdaEvent<Value>) -> Receipt {
     // the envelope is complete before validation.
     let mut value: Value = serde_json::from_slice(&raw).unwrap_or(Value::Null);
     if let Value::Object(map) = &mut value {
-        map.entry("provider").or_insert_with(|| Value::String("aws-lambda".into()));
-        map.entry("requestId").or_insert_with(|| Value::String(event.context.request_id.clone()));
+        map.entry("provider")
+            .or_insert_with(|| Value::String("aws-lambda".into()));
+        map.entry("requestId")
+            .or_insert_with(|| Value::String(event.context.request_id.clone()));
     }
     let raw = serde_json::to_vec(&value).unwrap_or_default();
     handle(&raw, Provider::AwsLambda, &event.context.request_id)
