@@ -98,3 +98,17 @@ canonical_file = ".fanwaave-cfg.toml"
 owner = "https://github.com/fanwaave"
 mode = "owner-schema-required"
 template = ""
+
+[[concerns]]
+id = "indiebuild"
+canonical_file = ".indiebuild.toml"
+owner = "https://github.com/gha-indie-worker"
+mode = "owner-schema-required"
+template = ""
+
+[[concerns]]
+id = "sidecar"
+canonical_file = ".ores-sidecar.toml"
+owner = "https://github.com/ores-chat/ores-chat-sidecar.rs"
+mode = "owner-schema-required"
+template = ""
