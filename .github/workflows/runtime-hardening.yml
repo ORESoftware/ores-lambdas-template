@@ -115,6 +115,11 @@ jobs:
           docker run --detach \
             --name "${container}" \
             --platform linux/amd64 \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --pids-limit 128 \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m \
             --env LAMBDA_SIDECAR_MODE=off \
             --publish 127.0.0.1:18080:8080 \
             "lambdas-runtime-smoke:${EXPECTED_SHA}" >/dev/null
@@ -140,6 +145,11 @@ jobs:
           curl --fail --silent --show-error http://127.0.0.1:18080/readyz >/dev/null
 
           test "$(docker exec "${container}" id -u)" != '0'
+          docker exec "${container}" sh -c 'test -r /app/.cli-flags.toml && test ! -w /app/.cli-flags.toml'
+          if docker exec "${container}" sh -c 'touch /app/runtime-must-not-write'; then
+            echo 'read-only runtime unexpectedly allowed a root-filesystem write' >&2
+            exit 1
+          fi
 
           curl --fail --silent --show-error \
             --header 'content-type: application/json' \
