@@ -1,0 +1,42 @@
+name: ORES OTEL runtime config
+
+on:
+  pull_request:
+    paths:
+      - '.ores-otel.toml'
+      - 'scripts/test_ores_otel_runtime_config.py'
+      - '.github/workflows/ores-otel-runtime-config.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.ores-otel.toml'
+      - 'scripts/test_ores_otel_runtime_config.py'
+      - '.github/workflows/ores-otel-runtime-config.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ores-otel-runtime-config-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  execute-config:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Execute .ores-otel.toml cold-start bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/test_ores_otel_runtime_config.py
+
+      - name: Prove the config stayed read-only
+        run: git diff --exit-code -- .ores-otel.toml
