@@ -1,6 +1,14 @@
-# worker-http contract: the platforms' port variables are honoured through flags-2-env, not ad hoc reads.
+# Sole argv/alias/type/default authority for lambda binaries.
+# Runtime secrets are environment/secret-store inputs and are never CLI flags.
 [help]
 url = "https://github.com/__ORG__/__PREFIX__-lambdas"
+
+[env]
+dotenv = false
+files = []
+
+[parse]
+allow_unknown = false
 
 [flags.port]
 type = "integer"
