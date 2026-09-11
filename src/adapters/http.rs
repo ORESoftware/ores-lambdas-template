@@ -2,7 +2,7 @@
 //! (`FUNCTIONS_CUSTOMHANDLER_PORT`, `host.json` forwards the raw request), Scintilla/Kubernetes,
 //! and local runs. `POST /invoke` carries the command envelope; `GET /healthz` and `/readyz` are
 //! the platform probes. The listener is started by the binary, never by the library.
-use crate::runtime::{handle, Provider, Receipt, MAX_INVOCATION_BYTES};
+use crate::runtime::{handle_bound, Provider, Receipt, MAX_INVOCATION_BYTES};
 use axum::{
     body::Bytes,
     extract::{DefaultBodyLimit, State},
@@ -40,19 +40,34 @@ pub fn router(config: HttpConfig) -> Router {
         .with_state(config)
 }
 
+fn request_id(provider: Provider, headers: &HeaderMap) -> String {
+    let provider_header = match provider {
+        Provider::GcpCloudRun => headers.get("x-cloud-trace-context"),
+        Provider::AzureFunctions => headers.get("x-azure-functions-invocationid"),
+        _ => None,
+    };
+
+    provider_header
+        .or_else(|| headers.get("x-request-id"))
+        .and_then(|value| value.to_str().ok())
+        .map(|value| {
+            if provider == Provider::GcpCloudRun {
+                value.split('/').next().unwrap_or(value)
+            } else {
+                value
+            }
+        })
+        .unwrap_or("http")
+        .to_owned()
+}
+
 async fn invoke(
     State(config): State<HttpConfig>,
     headers: HeaderMap,
     body: Bytes,
 ) -> (StatusCode, Json<Receipt>) {
-    let request_id = headers
-        .get("x-request-id")
-        .or_else(|| headers.get("x-cloud-trace-context"))
-        .or_else(|| headers.get("x-azure-functions-invocationid"))
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.split('/').next().unwrap_or(s).to_owned())
-        .unwrap_or_else(|| "http".to_owned());
-    let receipt = handle(&body, config.provider, &request_id);
+    let request_id = request_id(config.provider, &headers);
+    let receipt = handle_bound(&body, config.provider, &request_id);
     let status = if receipt.ok {
         StatusCode::OK
     } else if receipt
