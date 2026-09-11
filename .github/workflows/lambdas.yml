@@ -1,15 +1,107 @@
 name: lambdas
-on: { push: { branches: [main] }, pull_request: {} }
-permissions: { contents: read, packages: write, id-token: write }
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lambdas-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   TJSV_REVISION: 03ccc0ecdfc70f9198c3ccf80718910961d3fde1
+  CARGO_LAMBDA_VERSION: 1.9.2
+  CARGO_LAMBDA_X86_64_SHA256: b5c258c424ebaef39541c3641f33c51137ee6c426016f365628fedb2c737271d
 
 jobs:
-  contract-parity:
-    runs-on: ubuntu-latest
+  runtime-config-contract:
+    name: Root TOML and secret-boundary bootstrap
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Parse root TOML and verify the always-on OTEL envelope
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import tomllib
+
+          root = Path('.').resolve()
+          documents = {}
+          for path in sorted(root.glob('*.toml')):
+              if path.is_symlink():
+                  raise SystemExit(f'root TOML must not be a symlink: {path.name}')
+              if path.stat().st_size > 2 * 1024 * 1024:
+                  raise SystemExit(f'root TOML exceeds 2 MiB: {path.name}')
+              documents[path.name] = tomllib.loads(path.read_text(encoding='utf-8'))
+
+          otel = documents.get('.ores-otel.toml')
+          if not isinstance(otel, dict):
+              raise SystemExit('missing .ores-otel.toml')
+          if otel.get('version') != 1 or otel.get('mode') != 'server' or otel.get('strict') is not True:
+              raise SystemExit('.ores-otel.toml must be strict server-mode version 1')
+
+          flags = otel.get('flags2env')
+          expected = {
+              'contract': '.cli-flags.toml',
+              'require_audit': True,
+              'precedence': 'argv-over-env',
+          }
+          if flags != expected:
+              raise SystemExit('.ores-otel.toml flags2env envelope is not canonical')
+
+          names = set()
+          keys = set()
+          for binding in otel.get('env', []):
+              name = binding.get('name')
+              key = binding.get('key')
+              if not isinstance(name, str) or not isinstance(key, str):
+                  raise SystemExit('.ores-otel.toml env bindings require names and keys')
+              if name in names or key in keys:
+                  raise SystemExit('.ores-otel.toml env bindings must be unique')
+              names.add(name)
+              keys.add(key)
+              if binding.get('secret') is True and ('default' in binding or 'default_value' in binding):
+                  raise SystemExit('secret OTEL bindings may not contain plaintext defaults')
+
+          headers = next((item for item in otel.get('env', []) if item.get('key') == 'OTEL_EXPORTER_OTLP_HEADERS'), None)
+          if not headers or headers.get('secret') is not True:
+              raise SystemExit('OTLP headers must remain an environment-only secret binding')
+          PY
+
+      - name: Verify ores-sops plaintext boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fx '/env/dec/' .gitignore
+          grep -Fx '/env/enc/*' .gitignore
+          grep -Fx '!/env/enc/dev.env.enc' .gitignore
+          grep -Fx '!/env/enc/prod.env.enc' .gitignore
+          test ! -e env/dec
+          test ! -e .env
+
+  contract-parity:
+    name: Independent TypeSpec and JSON Schema parity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
       - name: Enforce independent TypeSpec and JSON Schema authorities
         uses: ORESoftware/typespec-json-schema-validator@03ccc0ecdfc70f9198c3ccf80718910961d3fde1
         with:
@@ -19,34 +111,56 @@ jobs:
           output_dir: .typespec-json-schema-validator/generated
       - name: Retain contract evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: lambda-contract-parity
+          name: lambda-contract-parity-${{ github.run_id }}
           path: .typespec-json-schema-validator/
           if-no-files-found: warn
+          retention-days: 30
 
   test:
-    needs: contract-parity
-    runs-on: ubuntu-latest
+    name: Rust and entrypoint verification
+    needs: [runtime-config-contract, contract-parity]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Check out exact source
+        uses: actions/checkout@3d342e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+      - name: Install the declared Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: "1.88"
+          components: rustfmt, clippy
       - name: Keep Docker and OCI build definitions aligned
         run: cmp -s Dockerfile Containerfile
       - name: Test container entrypoint contract
         run: sh scripts/test-entrypoint.sh
-      - run: cargo test --features http,portable,aws --all-targets
-      - run: cargo clippy --features http,portable,aws --all-targets -- -D warnings
+      - name: Verify formatting
+        run: cargo fmt --all --check
+      - name: Test all supported adapters
+        run: cargo test --features http,portable,aws --all-targets
+      - name: Lint all supported adapters
+        run: cargo clippy --features http,portable,aws --all-targets -- -D warnings
 
   container-artifacts:
+    name: OCI image ${{ matrix.arch }}
     needs: test
     strategy:
+      fail-fast: false
       matrix: { arch: [amd64, arm64] }
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Build target architecture image
         run: >-
           docker buildx build
@@ -56,49 +170,147 @@ jobs:
           --load .
 
   oci-layout:
+    name: Multi-platform OCI layout
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Build multi-platform OCI layout
         run: >-
           docker buildx build
           --platform linux/amd64,linux/arm64
           --build-arg VCS_REF=${{ github.sha }}
           --output type=oci,dest=/tmp/lambdas.oci .
-      - uses: actions/upload-artifact@v4
+      - name: Retain OCI layout
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: lambdas-oci-layout
+          name: lambdas-oci-layout-${{ github.run_id }}
           path: /tmp/lambdas.oci
+          if-no-files-found: error
+          retention-days: 30
 
   aws-artifacts:
+    name: AWS ${{ matrix.arch }} artifact
     needs: test
-    strategy: { matrix: { arch: [arm64, x86-64] } }
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: { arch: [arm64, x86-64] }
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: pip install cargo-lambda
-      - run: cargo lambda build --release --${{ matrix.arch == 'arm64' && 'arm64' || 'x86-64' }} --features aws --bin worker-aws --bin health --output-format zip
-      - name: release manifest (source sha, arch, adapter, runtime, checksum, toolchain)
-        run: |
-          for b in worker-aws health; do
-            z=target/lambda/$b/bootstrap.zip
-            printf '{"source":"%s","arch":"%s","adapter":"aws","runtime":"provided.al2023","binary":"%s","sha256":"%s","toolchain":"%s"}\n' "$GITHUB_SHA" "${{ matrix.arch }}" "$b" "$(sha256sum $z | cut -d' ' -f1)" "$(rustc -V)" >> target/lambda/manifest.jsonl
-          done
-      - uses: actions/upload-artifact@v4
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: aws-${{ matrix.arch }}
+          persist-credentials: false
+          show-progress: false
+      - name: Install the declared Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: "1.88"
+      - name: Install checksum-pinned Cargo Lambda
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="${RUNNER_TEMP}/cargo-lambda.tar.gz"
+          extract="${RUNNER_TEMP}/cargo-lambda-bin"
+          mkdir -p "${extract}"
+          curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+            "https://github.com/cargo-lambda/cargo-lambda/releases/download/v${CARGO_LAMBDA_VERSION}/cargo-lambda-v${CARGO_LAMBDA_VERSION}.x86_64-unknown-linux-musl.tar.gz" \
+            --output "${archive}"
+          printf '%s  %s\n' "${CARGO_LAMBDA_X86_64_SHA256}" "${archive}" | sha256sum --check --strict -
+          tar -xzf "${archive}" -C "${extract}"
+          binary="$(find "${extract}" -type f -name cargo-lambda -print -quit)"
+          test -n "${binary}"
+          install -m 0755 "${binary}" "${HOME}/.cargo/bin/cargo-lambda"
+          cargo lambda --version
+      - name: Build AWS ZIP artifacts
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          case "${ARCH}" in
+            arm64) architecture=(--arm64) ;;
+            x86-64) architecture=(--x86-64) ;;
+            *) echo "unsupported architecture: ${ARCH}" >&2; exit 2 ;;
+          esac
+          cargo lambda build \
+            --release \
+            "${architecture[@]}" \
+            --features aws \
+            --bin worker-aws \
+            --bin health \
+            --output-format zip
+      - name: Record source, architecture, runtime, and checksums
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          manifest=target/lambda/manifest.jsonl
+          : > "${manifest}"
+          for binary in worker-aws health; do
+            archive="target/lambda/${binary}/bootstrap.zip"
+            test -s "${archive}"
+            ARCH="${ARCH}" \
+            BINARY="${binary}" \
+            ARCHIVE="${archive}" \
+            SOURCE_REVISION="${GITHUB_SHA}" \
+            RUST_TOOLCHAIN="$(rustc -V)" \
+            CARGO_LAMBDA="$(cargo lambda --version)" \
+              python3 - <<'PY' >> "${manifest}"
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          archive = Path(os.environ["ARCHIVE"])
+          record = {
+              "adapter": "aws",
+              "architecture": os.environ["ARCH"],
+              "archive": archive.as_posix(),
+              "binary": os.environ["BINARY"],
+              "cargoLambda": os.environ["CARGO_LAMBDA"],
+              "runtime": "provided.al2023",
+              "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+              "sourceRevision": os.environ["SOURCE_REVISION"],
+              "rustToolchain": os.environ["RUST_TOOLCHAIN"],
+          }
+          print(json.dumps(record, sort_keys=True, separators=(",", ":")))
+          PY
+          done
+          test "$(wc -l < "${manifest}")" -eq 2
+          sha256sum target/lambda/*/bootstrap.zip > target/lambda/SHA256SUMS
+      - name: Retain exact AWS artifact evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: aws-${{ matrix.arch }}-${{ github.run_id }}
           path: target/lambda/
+          if-no-files-found: error
+          retention-days: 30
 
   images:
+    name: Publish generated-repository OCI images
     needs: [container-artifacts, oci-layout, aws-artifacts]
-    # The unrendered template intentionally contains placeholder coordinates; consumer repos publish after scaffold replacement.
-    if: github.ref == 'refs/heads/main' && github.repository != 'ORESoftware/ores-lambdas-template'
-    uses: ORESoftware/ores-gha-workflows/.github/workflows/container-images.yml@main
-    with: { image-name: __ORG__/__PREFIX__-lambdas, gcp-project: __GCP_PROJECT__, dockerhub-namespace: oresoftware }
+    # The unrendered template intentionally contains placeholder coordinates; consumer repos publish only after scaffold replacement.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository != 'ORESoftware/ores-lambdas-template'
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    uses: ORESoftware/ores-gha-workflows/.github/workflows/container-images.yml@09317aaf8f89a58b9ee87755db4daa2b242d6cb2
+    with:
+      image-name: __ORG__/__PREFIX__-lambdas
+      push: true
+      gcp-project: __GCP_PROJECT__
+      dockerhub-namespace: oresoftware
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
