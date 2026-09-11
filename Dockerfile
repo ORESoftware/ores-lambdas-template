@@ -41,9 +41,12 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system lambda \
     && useradd --system --gid lambda --home-dir /nonexistent --no-create-home lambda
+WORKDIR /app
 COPY --from=builder /out/lambda /usr/local/bin/lambda
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod 0555 /usr/local/bin/lambda /usr/local/bin/entrypoint.sh
+COPY .cli-flags.toml /app/.cli-flags.toml
+RUN chmod 0555 /usr/local/bin/lambda /usr/local/bin/entrypoint.sh \
+    && chmod 0444 /app/.cli-flags.toml
 USER lambda
 ENV PORT=8080 \
     LAMBDA_SIDECAR_MODE=combined \
