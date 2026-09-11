@@ -25,8 +25,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let parsed = parser.parse_structured(&argv, Some(CONTRACT))?;
     if !parsed.unknown_options.is_empty() || !parsed.errors.is_empty() {
         return Err(format!(
-            "invalid arguments: unknown={:?} errors={:?}",
-            parsed.unknown_options, parsed.errors
+            "invalid arguments: {} unknown option(s), {} parse error(s)",
+            parsed.unknown_options.len(),
+            parsed.errors.len()
         )
         .into());
     }

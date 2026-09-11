@@ -1,0 +1,9 @@
+{
+  "provider": "cloudflare-workers",
+  "requestId": "untrusted-body",
+  "command": {
+    "schemaVersion": "__PREFIX__.worker-command.v1",
+    "operation": "health",
+    "payload": {}
+  }
+}
