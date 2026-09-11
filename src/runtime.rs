@@ -7,6 +7,7 @@ pub const SCHEMA_VERSION: &str = "__PREFIX__.worker-command.v1";
 /// Invocations larger than this are rejected before JSON parsing.
 pub const MAX_INVOCATION_BYTES: usize = 256 * 1024;
 const MAX_ID_LEN: usize = 128;
+const SAFE_FALLBACK_REQUEST_ID: &str = "request";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -18,6 +19,20 @@ pub enum Provider {
     CloudflareWorkers,
     Scintilla,
     Local,
+}
+
+impl Provider {
+    const fn wire_name(self) -> &'static str {
+        match self {
+            Self::AwsLambda => "aws-lambda",
+            Self::GcpCloudRun => "gcp-cloud-run",
+            Self::AzureFunctions => "azure-functions",
+            Self::Vercel => "vercel",
+            Self::CloudflareWorkers => "cloudflare-workers",
+            Self::Scintilla => "scintilla",
+            Self::Local => "local",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -97,6 +112,42 @@ impl RejectReason {
     }
 }
 
+fn valid_request_id(request_id: &str) -> bool {
+    !request_id.is_empty()
+        && request_id.len() <= MAX_ID_LEN
+        && request_id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b':' || b == b'.')
+}
+
+fn safe_request_id(request_id: &str) -> String {
+    if valid_request_id(request_id) {
+        request_id.to_owned()
+    } else {
+        SAFE_FALLBACK_REQUEST_ID.to_owned()
+    }
+}
+
+fn rejected(provider: Provider, request_id: &str, reason: RejectReason) -> Receipt {
+    Receipt {
+        request_id: safe_request_id(request_id),
+        provider,
+        ok: false,
+        operation: None,
+        result: None,
+        error: Some(ErrorReceipt {
+            code: reason.code(),
+            message: reason.message(),
+        }),
+    }
+}
+
+fn parse_value(value: Value) -> Result<Invocation, RejectReason> {
+    let inv: Invocation = serde_json::from_value(value).map_err(|_| RejectReason::InvalidJson)?;
+    validate(&inv)?;
+    Ok(inv)
+}
+
 /// Parse and validate raw bytes into an invocation. Size check happens before parsing.
 pub fn parse(raw: &[u8]) -> Result<Invocation, RejectReason> {
     if raw.len() > MAX_INVOCATION_BYTES {
@@ -111,13 +162,7 @@ pub fn validate(inv: &Invocation) -> Result<(), RejectReason> {
     if inv.command.schema_version != SCHEMA_VERSION {
         return Err(RejectReason::UnsupportedSchema);
     }
-    if inv.request_id.is_empty()
-        || inv.request_id.len() > MAX_ID_LEN
-        || !inv
-            .request_id
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b':' || b == b'.')
-    {
+    if !valid_request_id(&inv.request_id) {
         return Err(RejectReason::UnboundedIdentifier);
     }
     Ok(())
@@ -145,22 +190,45 @@ pub fn dispatch(inv: &Invocation) -> Receipt {
     }
 }
 
-/// Parse + dispatch, producing a receipt either way. `provider` and `request_id` are the
-/// adapter's best knowledge for rejected envelopes (they may not be parseable).
+/// Parse + dispatch an envelope whose provider/request id remain envelope-authoritative. This is
+/// appropriate for portable/stdin hosts with no stronger invocation metadata. Rejected envelopes
+/// use the adapter's fallback metadata, with request ids normalized to the bounded wire policy.
 pub fn handle(raw: &[u8], provider: Provider, fallback_request_id: &str) -> Receipt {
     match parse(raw) {
         Ok(inv) => dispatch(&inv),
-        Err(reason) => Receipt {
-            request_id: fallback_request_id.chars().take(MAX_ID_LEN).collect(),
-            provider,
-            ok: false,
-            operation: None,
-            result: None,
-            error: Some(ErrorReceipt {
-                code: reason.code(),
-                message: reason.message(),
-            }),
-        },
+        Err(reason) => rejected(provider, fallback_request_id, reason),
+    }
+}
+
+/// Parse + dispatch while making adapter provenance authoritative. AWS/HTTP adapters use this path
+/// because their runtime context is stronger than caller-controlled envelope metadata. The raw
+/// payload is size-bounded before JSON parsing, and only the provider/request-id fields are stamped;
+/// the command remains subject to the same strict `Invocation` deserializer and validation.
+pub fn handle_bound(raw: &[u8], provider: Provider, request_id: &str) -> Receipt {
+    if raw.len() > MAX_INVOCATION_BYTES {
+        return rejected(provider, request_id, RejectReason::TooLarge);
+    }
+
+    let mut value: Value = match serde_json::from_slice(raw) {
+        Ok(value) => value,
+        Err(_) => return rejected(provider, request_id, RejectReason::InvalidJson),
+    };
+    let Value::Object(map) = &mut value else {
+        return rejected(provider, request_id, RejectReason::InvalidJson);
+    };
+
+    map.insert(
+        "provider".to_owned(),
+        Value::String(provider.wire_name().to_owned()),
+    );
+    map.insert(
+        "requestId".to_owned(),
+        Value::String(safe_request_id(request_id)),
+    );
+
+    match parse_value(value) {
+        Ok(inv) => dispatch(&inv),
+        Err(reason) => rejected(provider, request_id, reason),
     }
 }
 
@@ -182,6 +250,27 @@ mod tests {
         let r = handle(envelope("echo").as_bytes(), Provider::Local, "x");
         assert_eq!(r.result.unwrap()["a"], 1);
         assert_eq!(r.request_id, "t-1");
+    }
+
+    #[test]
+    fn bound_context_overrides_envelope_metadata() {
+        let r = handle_bound(
+            envelope("health").as_bytes(),
+            Provider::AwsLambda,
+            "lambda-123",
+        );
+        assert!(r.ok);
+        assert_eq!(r.provider, Provider::AwsLambda);
+        assert_eq!(r.request_id, "lambda-123");
+
+        let r = handle_bound(
+            envelope("health").as_bytes(),
+            Provider::GcpCloudRun,
+            "bad id with spaces",
+        );
+        assert!(r.ok);
+        assert_eq!(r.provider, Provider::GcpCloudRun);
+        assert_eq!(r.request_id, SAFE_FALLBACK_REQUEST_ID);
     }
 
     #[test]
@@ -238,10 +327,15 @@ mod tests {
     }
 
     #[test]
-    fn receipt_never_reflects_payload_on_error() {
+    fn receipt_never_reflects_payload_or_unsafe_fallback_on_error() {
         let r = handle(b"{\"provider\":\"local\",\"requestId\":\"\",\"command\":{\"schemaVersion\":\"x\",\"operation\":\"health\"}}", Provider::Local, "fallback-id");
         let text = serde_json::to_string(&r).unwrap();
         assert!(!text.contains("\"x\""));
         assert_eq!(r.request_id, "fallback-id");
+
+        let r = handle(b"{", Provider::Local, "bad id\nsecret");
+        let text = serde_json::to_string(&r).unwrap();
+        assert_eq!(r.request_id, SAFE_FALLBACK_REQUEST_ID);
+        assert!(!text.contains("secret"));
     }
 }
