@@ -1,0 +1,90 @@
+schema_version = 1
+
+# Always-on baseline. This file already lives at the generated repository root.
+[[concerns]]
+id = "otel"
+canonical_file = ".ores-otel.toml"
+owner = "https://github.com/ores-otel"
+mode = "required"
+template = ""
+
+[[concerns]]
+id = "middleware"
+canonical_file = ".ores-mw.toml"
+owner = "https://github.com/ORESoftware/ores-middleware"
+mode = "optional"
+template = "config/concerns/templates/ores-mw.toml"
+
+[[concerns]]
+id = "rate-limit"
+canonical_file = ".ores-rl.toml"
+owner = "https://github.com/ores-rate-limit/ores-rl-lib-core"
+mode = "optional"
+template = "config/concerns/templates/ores-rl.toml"
+
+[[concerns]]
+id = "chat"
+canonical_file = ".ores-chat.toml"
+owner = "https://github.com/ores-chat/ores-chat-interfaces"
+mode = "optional"
+template = "config/concerns/templates/ores-chat.toml"
+
+[[concerns]]
+id = "shared-auth"
+canonical_file = ".shared-auth.toml"
+aliases = [".auth-shared.toml"]
+owner = "https://github.com/shared-auth/shared-auth-interfaces"
+mode = "optional"
+template = "config/concerns/templates/shared-auth.toml"
+
+# Recognized fleet contracts whose owner schema/example must be reviewed before
+# the template may materialize them. Cataloguing them lets audits detect their
+# filenames without fabricating semantics or silently enabling a dependency.
+[[concerns]]
+id = "redis-lru"
+canonical_file = ".ores-lru.toml"
+owner = "https://github.com/ores-redis-lru-cache"
+mode = "owner-schema-required"
+template = ""
+
+[[concerns]]
+id = "forms"
+canonical_file = ".ores-forms.toml"
+owner = "https://github.com/ores-forms"
+mode = "owner-schema-required"
+template = ""
+
+[[concerns]]
+id = "opto-sync"
+canonical_file = ".opto-sync.toml"
+owner = "https://github.com/opto-sync"
+mode = "owner-schema-required"
+template = ""
+
+[[concerns]]
+id = "legal"
+canonical_file = ".ores-legal.toml"
+owner = "https://github.com/ores-legal"
+mode = "owner-schema-required"
+template = ""
+
+[[concerns]]
+id = "wasm"
+canonical_file = ".ores-wasm.toml"
+owner = "https://github.com/ores-wasm-loaders"
+mode = "owner-schema-required"
+template = ""
+
+[[concerns]]
+id = "rpc"
+canonical_file = ".ores-rpc.toml"
+owner = "https://github.com/ORESoftware/api-docs"
+mode = "owner-schema-required"
+template = ""
+
+[[concerns]]
+id = "fanwaave"
+canonical_file = ".fanwaave-cfg.toml"
+owner = "https://github.com/fanwaave"
+mode = "owner-schema-required"
+template = ""
