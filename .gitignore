@@ -1,8 +1,22 @@
 target/
 .vendor/
-.env
-.env.*
 .typespec-json-schema-validator/
 dist/
 tmp/
 temp/
+
+# ores-sops managed dotenv boundary. Plaintext is always local-only.
+*.env
+*/*.env
+*/**/*.env
+.env.*
+*.env.*
+!.env.example
+
+/env/dec/
+
+# Legacy-safe dev/prod ciphertext allowlist. Generated repositories that opt
+# into the exact v0.4 stage rule add !/env/enc/stage.env.enc at the same time.
+/env/enc/*
+!/env/enc/dev.env.enc
+!/env/enc/prod.env.enc
