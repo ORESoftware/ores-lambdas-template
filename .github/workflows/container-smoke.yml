@@ -1,0 +1,63 @@
+name: OCI runtime smoke
+
+on:
+  pull_request:
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Dockerfile'
+      - 'Containerfile'
+      - 'entrypoint.sh'
+      - '.cli-flags.toml'
+      - 'src/**'
+      - 'scripts/test-container-runtime.sh'
+      - '.github/workflows/container-smoke.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Dockerfile'
+      - 'Containerfile'
+      - 'entrypoint.sh'
+      - '.cli-flags.toml'
+      - 'src/**'
+      - 'scripts/test-container-runtime.sh'
+      - '.github/workflows/container-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lambda-container-smoke-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  runtime-smoke:
+    name: Hardened container invocation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Keep Docker and OCI definitions identical
+        run: cmp -s Dockerfile Containerfile
+
+      - name: Configure Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Build exact amd64 runtime image
+        run: >-
+          docker buildx build
+          --platform linux/amd64
+          --build-arg VCS_REF=${{ github.event.pull_request.head.sha || github.sha }}
+          --tag lambdas-runtime-smoke:${{ github.run_id }}
+          --load .
+
+      - name: Exercise hardened runtime boundary
+        run: sh scripts/test-container-runtime.sh lambdas-runtime-smoke:${{ github.run_id }}
