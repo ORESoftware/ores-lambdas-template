@@ -3,99 +3,24 @@ set -eu
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT INT TERM
+trap 'rm -rf "$tmp" "$tmp-compat" "$tmp-conflict" "$tmp-blocked" "$tmp-invalid" "$tmp-duplicate" "$tmp-empty"' EXIT INT TERM
+
+# Parse the catalog, root TOMLs, and reviewed templates with Rust so the same
+# production-language toolchain that builds Lambda code owns semantic validation.
+cargo test --quiet --manifest-path "$repo/Cargo.toml" --test concern_catalog_contract
 
 cp -R "$repo/config" "$tmp/config"
 cp "$repo/.ores-otel.toml" "$tmp/.ores-otel.toml"
-
-python3 - "$repo/config/concerns/catalog.toml" <<'PY'
-import pathlib
-import re
-import sys
-import tomllib
-
-path = pathlib.Path(sys.argv[1])
-doc = tomllib.loads(path.read_text(encoding="utf-8"))
-assert doc.get("schema_version") == 1
-concerns = doc.get("concerns")
-assert isinstance(concerns, list) and concerns
-ids = set()
-files = set()
-for concern in concerns:
-    cid = concern.get("id")
-    canonical = concern.get("canonical_file")
-    mode = concern.get("mode")
-    owner = concern.get("owner")
-    template = concern.get("template")
-    assert isinstance(cid, str) and cid and cid not in ids
-    assert isinstance(canonical, str) and canonical.startswith(".") and canonical.endswith(".toml")
-    assert canonical not in files
-    assert isinstance(owner, str) and owner.startswith("https://github.com/")
-    assert mode in {"required", "optional", "owner-schema-required"}
-    assert isinstance(template, str)
-
-    revision = concern.get("source_revision")
-    if revision is not None:
-        assert isinstance(revision, str) and re.fullmatch(r"[0-9a-f]{40}", revision), (
-            f"{cid}: source_revision must be an immutable lowercase 40-hex commit"
-        )
-
-    if mode == "optional":
-        assert template, f"optional concern {cid} must have a reviewed template"
-        assert (path.parent.parent.parent / template).is_file(), template
-    if mode == "owner-schema-required":
-        assert not template, f"unadmitted concern {cid} must not fabricate a template"
-
-    if concern.get("tjsv_required") is True:
-        assert revision, f"{cid}: TJSV-gated concern requires an exact owner revision"
-        typespec = concern.get("typespec")
-        schema = concern.get("json_schema")
-        assert isinstance(typespec, str) and typespec.startswith("contracts/") and typespec.endswith(".tsp"), (
-            f"{cid}: missing owner TypeSpec authority path"
-        )
-        assert isinstance(schema, str) and schema.startswith("contracts/") and schema.endswith(".json"), (
-            f"{cid}: missing owner authored JSON Schema authority path"
-        )
-
-    ids.add(cid)
-    files.add(canonical)
-
-shared = next(item for item in concerns if item["id"] == "shared-auth")
-assert shared["canonical_file"] == ".shared-auth.toml"
-assert shared.get("aliases") == [".auth-shared.toml"]
-
-for cid in ("rate-limit", "chat"):
-    concern = next(item for item in concerns if item["id"] == cid)
-    assert concern.get("tjsv_required") is True
-PY
 
 sh "$repo/scripts/enable-concern.sh" "$tmp" "otel,middleware,rate-limit,chat,shared-auth"
 for file in .ores-otel.toml .ores-mw.toml .ores-rl.toml .ores-chat.toml .shared-auth.toml; do
   test -s "$tmp/$file"
 done
 test ! -e "$tmp/.auth-shared.toml"
-
-python3 - "$tmp" <<'PY'
-import pathlib
-import sys
-import tomllib
-
-root = pathlib.Path(sys.argv[1])
-for path in root.glob(".*.toml"):
-    tomllib.loads(path.read_text(encoding="utf-8"))
-
-shared = tomllib.loads((root / ".shared-auth.toml").read_text(encoding="utf-8"))
-assert shared["compatibility"]["repository"] == "https://github.com/shared-auth/shared-auth-interfaces"
-assert shared["factors"]["two_factor"]["required"] is True
-
-chat = tomllib.loads((root / ".ores-chat.toml").read_text(encoding="utf-8"))
-assert chat["flags2env"]["contract"] == ".cli-flags.toml"
-assert chat["strict"] is True
-
-rate = tomllib.loads((root / ".ores-rl.toml").read_text(encoding="utf-8"))
-for policy in rate["policies"]:
-    assert policy["backendFailureMode"] == "fail-closed"
-PY
+cmp -s "$repo/config/concerns/templates/ores-mw.toml" "$tmp/.ores-mw.toml"
+cmp -s "$repo/config/concerns/templates/ores-rl.toml" "$tmp/.ores-rl.toml"
+cmp -s "$repo/config/concerns/templates/ores-chat.toml" "$tmp/.ores-chat.toml"
+cmp -s "$repo/config/concerns/templates/shared-auth.toml" "$tmp/.shared-auth.toml"
 
 compat="$tmp-compat"
 mkdir -p "$compat/config/concerns/templates"
@@ -104,17 +29,69 @@ cp "$repo/.ores-otel.toml" "$compat/.ores-otel.toml"
 sh "$repo/scripts/enable-concern.sh" "$compat" "shared-auth-compat"
 test -s "$compat/.auth-shared.toml"
 test ! -e "$compat/.shared-auth.toml"
+cmp -s "$repo/config/concerns/templates/shared-auth.toml" "$compat/.auth-shared.toml"
 if sh "$repo/scripts/enable-concern.sh" "$compat" "shared-auth"; then
   echo "canonical and compatibility Shared Auth files must not coexist" >&2
   exit 1
 fi
-rm -rf "$compat"
 
-blocked="$tmp-blocked"
-mkdir -p "$blocked/config/concerns/templates"
-cp "$repo/.ores-otel.toml" "$blocked/.ores-otel.toml"
-if sh "$repo/scripts/enable-concern.sh" "$blocked" "forms"; then
-  echo "unadmitted concern unexpectedly materialized" >&2
+# A conflicting request must fail before either alias is materialized.
+conflict="$tmp-conflict"
+mkdir -p "$conflict/config/concerns/templates"
+cp "$repo/config/concerns/templates/shared-auth.toml" "$conflict/config/concerns/templates/shared-auth.toml"
+cp "$repo/.ores-otel.toml" "$conflict/.ores-otel.toml"
+if sh "$repo/scripts/enable-concern.sh" "$conflict" "shared-auth,shared-auth-compat"; then
+  echo "conflicting Shared Auth request unexpectedly succeeded" >&2
   exit 1
 fi
-rm -rf "$blocked"
+test ! -e "$conflict/.shared-auth.toml"
+test ! -e "$conflict/.auth-shared.toml"
+
+# Every catalogued-but-unadmitted concern remains fail-closed.
+blocked="$tmp-blocked"
+cp -R "$repo/config" "$blocked/config"
+cp "$repo/.ores-otel.toml" "$blocked/.ores-otel.toml"
+for concern in redis-lru forms opto-sync legal wasm rpc fanwaave; do
+  if sh "$repo/scripts/enable-concern.sh" "$blocked" "$concern"; then
+    echo "unadmitted concern unexpectedly materialized: $concern" >&2
+    exit 1
+  fi
+done
+find "$blocked" -maxdepth 1 -type f ! -name '.ores-otel.toml' -print | grep -q . && {
+  echo "blocked concern request mutated destination root" >&2
+  exit 1
+}
+
+# Preflight the entire comma-list before writing anything. A valid first item
+# must not be left behind when a later item is blocked or unknown.
+invalid="$tmp-invalid"
+cp -R "$repo/config" "$invalid/config"
+cp "$repo/.ores-otel.toml" "$invalid/.ores-otel.toml"
+if sh "$repo/scripts/enable-concern.sh" "$invalid" "middleware,forms"; then
+  echo "mixed admitted/blocked request unexpectedly succeeded" >&2
+  exit 1
+fi
+test ! -e "$invalid/.ores-mw.toml"
+if sh "$repo/scripts/enable-concern.sh" "$invalid" "chat,unknown-concern"; then
+  echo "mixed admitted/unknown request unexpectedly succeeded" >&2
+  exit 1
+fi
+test ! -e "$invalid/.ores-chat.toml"
+
+# Duplicate and empty requests are configuration mistakes, not no-ops.
+duplicate="$tmp-duplicate"
+cp -R "$repo/config" "$duplicate/config"
+cp "$repo/.ores-otel.toml" "$duplicate/.ores-otel.toml"
+if sh "$repo/scripts/enable-concern.sh" "$duplicate" "chat,chat"; then
+  echo "duplicate concern request unexpectedly succeeded" >&2
+  exit 1
+fi
+test ! -e "$duplicate/.ores-chat.toml"
+
+empty="$tmp-empty"
+cp -R "$repo/config" "$empty/config"
+cp "$repo/.ores-otel.toml" "$empty/.ores-otel.toml"
+if sh "$repo/scripts/enable-concern.sh" "$empty" ", ,"; then
+  echo "empty concern request unexpectedly succeeded" >&2
+  exit 1
+fi
