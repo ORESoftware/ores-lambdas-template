@@ -244,8 +244,10 @@ jobs:
             --output "${archive}"
           printf '%s  %s\n' "${ZIG_X86_64_LINUX_SHA256}" "${archive}" | sha256sum --check --strict -
           tar -xJf "${archive}" -C "${extract}" --strip-components=1
-          install -m 0755 "${extract}/zig" "${HOME}/.cargo/bin/zig"
-          test "$(zig version)" = "${ZIG_VERSION}"
+          test -x "${extract}/zig"
+          test -d "${extract}/lib"
+          echo "${extract}" >> "${GITHUB_PATH}"
+          "${extract}/zig" version | grep -Fx "${ZIG_VERSION}"
       - name: Build AWS ZIP artifacts
         shell: bash
         env:
