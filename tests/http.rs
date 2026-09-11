@@ -53,9 +53,7 @@ async fn platform_metadata_overrides_spoofed_body_metadata() {
                 .header("content-type", "application/json")
                 .header("x-request-id", "generic-spoof")
                 .header("x-cloud-trace-context", "trace-42/span-7;o=1")
-                .body(Body::from(include_str!(
-                    "fixtures/spoofed-invocation.json"
-                )))
+                .body(Body::from(include_str!("fixtures/spoofed-invocation.json")))
                 .unwrap(),
         )
         .await
@@ -76,9 +74,7 @@ async fn azure_invocation_header_precedes_generic_request_id() {
                 .header("content-type", "application/json")
                 .header("x-request-id", "generic-spoof")
                 .header("x-azure-functions-invocationid", "azure-42")
-                .body(Body::from(include_str!(
-                    "fixtures/spoofed-invocation.json"
-                )))
+                .body(Body::from(include_str!("fixtures/spoofed-invocation.json")))
                 .unwrap(),
         )
         .await
@@ -96,9 +92,7 @@ async fn unsafe_request_id_is_not_reflected() {
             Request::post("/invoke")
                 .header("content-type", "application/json")
                 .header("x-request-id", "bad id with spaces")
-                .body(Body::from(include_str!(
-                    "fixtures/spoofed-invocation.json"
-                )))
+                .body(Body::from(include_str!("fixtures/spoofed-invocation.json")))
                 .unwrap(),
         )
         .await
