@@ -1,0 +1,58 @@
+name: lambda concern contracts
+
+on:
+  pull_request:
+    paths:
+      - 'config/concerns/**'
+      - 'scripts/enable-concern.sh'
+      - 'scripts/test-concern-catalog.sh'
+      - 'scripts/scaffold.sh'
+      - '.github/workflows/concern-contracts.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'config/concerns/**'
+      - 'scripts/enable-concern.sh'
+      - 'scripts/test-concern-catalog.sh'
+      - 'scripts/scaffold.sh'
+      - '.github/workflows/concern-contracts.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lambda-concern-contracts-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  concern-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Syntax-check materializers
+        shell: bash
+        run: |
+          set -euo pipefail
+          sh -n scripts/enable-concern.sh
+          sh -n scripts/scaffold.sh
+          sh -n scripts/test-concern-catalog.sh
+
+      - name: Exercise owner-derived concern contracts
+        shell: bash
+        run: sh scripts/test-concern-catalog.sh
+
+      - name: Reject simultaneous Shared Auth canonical and compatibility filenames
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test -e .shared-auth.toml && test -e .auth-shared.toml; then
+            echo 'do not keep .shared-auth.toml and .auth-shared.toml together' >&2
+            exit 1
+          fi
