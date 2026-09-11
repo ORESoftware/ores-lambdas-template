@@ -115,9 +115,9 @@ impl RejectReason {
 fn valid_request_id(request_id: &str) -> bool {
     !request_id.is_empty()
         && request_id.len() <= MAX_ID_LEN
-        && request_id.bytes().all(|b| {
-            b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b':' || b == b'.'
-        })
+        && request_id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b':' || b == b'.')
 }
 
 fn safe_request_id(request_id: &str) -> String {
