@@ -17,6 +17,8 @@ env:
   TJSV_REVISION: 03ccc0ecdfc70f9198c3ccf80718910961d3fde1
   CARGO_LAMBDA_VERSION: 1.9.2
   CARGO_LAMBDA_X86_64_SHA256: b5c258c424ebaef39541c3641f33c51137ee6c426016f365628fedb2c737271d
+  ZIG_VERSION: 0.13.0
+  ZIG_X86_64_LINUX_SHA256: d45312e61ebcc48032b77bc4cf7fd6915c11fa16e4aad116b66c9468211230ea
 
 jobs:
   runtime-config-contract:
@@ -230,6 +232,20 @@ jobs:
           test -n "${binary}"
           install -m 0755 "${binary}" "${HOME}/.cargo/bin/cargo-lambda"
           cargo lambda --version
+      - name: Install checksum-pinned Zig
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="${RUNNER_TEMP}/zig.tar.xz"
+          extract="${RUNNER_TEMP}/zig"
+          mkdir -p "${extract}"
+          curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+            "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz" \
+            --output "${archive}"
+          printf '%s  %s\n' "${ZIG_X86_64_LINUX_SHA256}" "${archive}" | sha256sum --check --strict -
+          tar -xJf "${archive}" -C "${extract}" --strip-components=1
+          install -m 0755 "${extract}/zig" "${HOME}/.cargo/bin/zig"
+          test "$(zig version)" = "${ZIG_VERSION}"
       - name: Build AWS ZIP artifacts
         shell: bash
         env:
