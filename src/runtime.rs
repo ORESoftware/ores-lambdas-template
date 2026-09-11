@@ -219,8 +219,14 @@ pub fn handle_bound(raw: &[u8], provider: Provider, request_id: &str) -> Receipt
         map.into_iter()
             .filter(|(key, _)| key != "provider" && key != "requestId")
             .chain([
-                ("provider".to_owned(), Value::String(provider.wire_name().to_owned())),
-                ("requestId".to_owned(), Value::String(safe_request_id(request_id))),
+                (
+                    "provider".to_owned(),
+                    Value::String(provider.wire_name().to_owned()),
+                ),
+                (
+                    "requestId".to_owned(),
+                    Value::String(safe_request_id(request_id)),
+                ),
             ]),
     ));
 
