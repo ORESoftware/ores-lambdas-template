@@ -23,9 +23,9 @@ RUN set -eux; \
     rustup target add "$target"; \
     linker_var="CARGO_TARGET_$(printf '%s' "$target" | tr '[:lower:]-' '[:upper:]_')_LINKER"; \
     if [ -n "$CARGO_FEATURES" ]; then \
-      env "$linker_var=$linker" cargo build --release --target "$target" --bin "$BINARY" --features "$CARGO_FEATURES"; \
+      env "$linker_var=$linker" cargo build --locked --release --target "$target" --bin "$BINARY" --features "$CARGO_FEATURES"; \
     else \
-      env "$linker_var=$linker" cargo build --release --target "$target" --bin "$BINARY"; \
+      env "$linker_var=$linker" cargo build --locked --release --target "$target" --bin "$BINARY"; \
     fi; \
     install -Dm755 "target/$target/release/$BINARY" /out/lambda
 
