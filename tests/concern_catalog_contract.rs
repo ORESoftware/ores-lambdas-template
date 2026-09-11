@@ -120,7 +120,10 @@ fn otel_baseline_remains_strict_secret_safe_and_flags2env_bound() {
             .get("key")
             .and_then(Value::as_str)
             .expect("OTEL env binding key");
-        assert!(names.insert(name), "duplicate OTEL env binding name: {name}");
+        assert!(
+            names.insert(name),
+            "duplicate OTEL env binding name: {name}"
+        );
         assert!(keys.insert(key), "duplicate OTEL env binding key: {key}");
 
         if table.get("secret").and_then(Value::as_bool) == Some(true) {
@@ -155,10 +158,7 @@ fn concern_catalog_is_unique_pinned_and_fail_closed() {
     let mut filenames = BTreeSet::new();
     for concern in concerns {
         let table = concern.as_table().expect("concern table");
-        let id = table
-            .get("id")
-            .and_then(Value::as_str)
-            .expect("concern id");
+        let id = table.get("id").and_then(Value::as_str).expect("concern id");
         let canonical = table
             .get("canonical_file")
             .and_then(Value::as_str)
@@ -183,7 +183,10 @@ fn concern_catalog_is_unique_pinned_and_fail_closed() {
             filenames.insert(canonical),
             "duplicate canonical concern filename: {canonical}"
         );
-        assert!(owner.starts_with(GITHUB_OWNER_PREFIX), "invalid owner for {id}");
+        assert!(
+            owner.starts_with(GITHUB_OWNER_PREFIX),
+            "invalid owner for {id}"
+        );
         assert!(
             matches!(mode, "required" | "optional" | "owner-schema-required"),
             "unsupported concern mode {mode} for {id}"
@@ -206,7 +209,10 @@ fn concern_catalog_is_unique_pinned_and_fail_closed() {
 
         match mode {
             "optional" => {
-                assert!(!template.is_empty(), "optional concern {id} needs a template");
+                assert!(
+                    !template.is_empty(),
+                    "optional concern {id} needs a template"
+                );
                 parse_toml(&root.join(template));
             }
             "owner-schema-required" => assert!(
