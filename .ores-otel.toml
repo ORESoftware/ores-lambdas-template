@@ -1,0 +1,88 @@
+version = 1
+mode = "server"
+strict = true
+
+[flags2env]
+contract = ".cli-flags.toml"
+require_audit = true
+precedence = "argv-over-env"
+
+[[env]]
+name = "service_name"
+key = "ORES_OTEL_SERVICE_NAME"
+kind = "string"
+required = false
+secret = false
+default = "__PREFIX__-lambdas"
+description = "Bounded OpenTelemetry service name for generated lambda repositories."
+
+[[env]]
+name = "log_filter"
+key = "RUST_LOG"
+kind = "string"
+required = false
+secret = false
+default = "info"
+description = "Structured logging filter; exporter credentials remain environment-only."
+
+[[env]]
+name = "sample_ratio"
+key = "ORES_OTEL_SAMPLE_RATIO"
+kind = "double"
+required = false
+secret = false
+default = "1.0"
+description = "Trace sampling ratio from 0.0 through 1.0."
+
+[[env]]
+name = "include_trace_context"
+key = "ORES_OTEL_TRACE_CONTEXT"
+kind = "bool"
+required = false
+secret = false
+default = "true"
+description = "Include trace/span correlation fields in structured logs."
+
+[[env]]
+name = "otlp_endpoint"
+key = "OTEL_EXPORTER_OTLP_ENDPOINT"
+kind = "url"
+required = false
+secret = false
+description = "OTLP endpoint; credentials belong in OTLP headers, not the URL."
+
+[[env]]
+name = "otlp_headers"
+key = "OTEL_EXPORTER_OTLP_HEADERS"
+kind = "string"
+required = false
+secret = true
+description = "Exporter authorization headers; environment-only and always redacted."
+
+[[env]]
+name = "batch_max_queue"
+key = "ORES_OTEL_BATCH_MAX_QUEUE"
+kind = "integer"
+required = false
+secret = false
+default = "2048"
+description = "Maximum queued spans/log records before backpressure policy applies."
+
+[[env]]
+name = "redact_fields"
+key = "ORES_OTEL_REDACT_FIELDS"
+kind = "json"
+required = false
+secret = false
+default = "[\"authorization\",\"cookie\",\"set-cookie\"]"
+description = "JSON array of field names redacted before export."
+
+[server]
+enabled = true
+service_name_binding = "service_name"
+log_filter_binding = "log_filter"
+sample_ratio_binding = "sample_ratio"
+otlp_endpoint_binding = "otlp_endpoint"
+otlp_headers_binding = "otlp_headers"
+batch_max_queue_binding = "batch_max_queue"
+redact_fields_binding = "redact_fields"
