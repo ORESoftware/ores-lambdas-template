@@ -6,6 +6,7 @@ on:
       - 'config/concerns/**'
       - 'scripts/enable-concern.sh'
       - 'scripts/oresc-audit.sh'
+      - 'scripts/test-oresc-audit.sh'
       - 'scripts/test-concern-catalog.sh'
       - 'scripts/scaffold.sh'
       - '.github/workflows/concern-contracts.yml'
@@ -15,6 +16,7 @@ on:
       - 'config/concerns/**'
       - 'scripts/enable-concern.sh'
       - 'scripts/oresc-audit.sh'
+      - 'scripts/test-oresc-audit.sh'
       - 'scripts/test-concern-catalog.sh'
       - 'scripts/scaffold.sh'
       - '.github/workflows/concern-contracts.yml'
@@ -44,8 +46,13 @@ jobs:
           set -euo pipefail
           sh -n scripts/enable-concern.sh
           bash -n scripts/oresc-audit.sh
+          bash -n scripts/test-oresc-audit.sh
           sh -n scripts/scaffold.sh
           sh -n scripts/test-concern-catalog.sh
+
+      - name: Exercise ores-cli audit wrapper contract
+        shell: bash
+        run: bash scripts/test-oresc-audit.sh
 
       - name: Exercise owner-derived concern contracts
         shell: bash
