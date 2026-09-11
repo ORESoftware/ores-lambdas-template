@@ -12,7 +12,10 @@ fi
 printf "command is '%s'\n" "$1" >&2
 
 mode="${LAMBDA_SIDECAR_MODE:-combined}"
-fail_mode="${LAMBDA_SIDECAR_FAIL_MODE:-open}"
+# Fail closed unless a deployment explicitly opts into fail-open behavior. Sidecars
+# can carry telemetry/security policy, so absence or failure must not be silently
+# treated as successful admission by the reusable template.
+fail_mode="${LAMBDA_SIDECAR_FAIL_MODE:-closed}"
 combined_proc="${LAMBDA_SIDECAR_PROC:-any_such_sidecar_proc}"
 stdout_proc="${LAMBDA_STDOUT_SIDECAR_PROC:-$combined_proc}"
 stderr_proc="${LAMBDA_STDERR_SIDECAR_PROC:-$combined_proc}"
@@ -86,7 +89,7 @@ runtime_dir="$(mktemp -d "${TMPDIR:-/tmp}/lambda-sidecar.XXXXXX")" || exit 70
 
 if [ "$mode" = combined ]; then
   if ! sidecar_available "$combined_proc"; then
-    printf "entrypoint: sidecar '%s' unavailable; fail-open direct execution\n" "$combined_proc" >&2
+    printf "entrypoint: sidecar '%s' unavailable; using configured failure policy\n" "$combined_proc" >&2
     if [ "$fail_mode" = closed ]; then
       exit 69
     fi
