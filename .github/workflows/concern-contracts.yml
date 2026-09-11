@@ -5,6 +5,7 @@ on:
     paths:
       - 'config/concerns/**'
       - 'scripts/enable-concern.sh'
+      - 'scripts/oresc-audit.sh'
       - 'scripts/test-concern-catalog.sh'
       - 'scripts/scaffold.sh'
       - '.github/workflows/concern-contracts.yml'
@@ -13,6 +14,7 @@ on:
     paths:
       - 'config/concerns/**'
       - 'scripts/enable-concern.sh'
+      - 'scripts/oresc-audit.sh'
       - 'scripts/test-concern-catalog.sh'
       - 'scripts/scaffold.sh'
       - '.github/workflows/concern-contracts.yml'
@@ -36,11 +38,12 @@ jobs:
           persist-credentials: false
           show-progress: false
 
-      - name: Syntax-check materializers
+      - name: Syntax-check materializers and ores-cli audit entrypoint
         shell: bash
         run: |
           set -euo pipefail
           sh -n scripts/enable-concern.sh
+          bash -n scripts/oresc-audit.sh
           sh -n scripts/scaffold.sh
           sh -n scripts/test-concern-catalog.sh
 
