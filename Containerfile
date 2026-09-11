@@ -43,6 +43,10 @@ RUN apt-get update \
     && useradd --system --gid lambda --home-dir /nonexistent --no-create-home lambda
 COPY --from=builder /out/lambda /usr/local/bin/lambda
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+# flags-2-env audits this runtime contract before the listener starts. Keep it in the image at a
+# stable working directory; omitting it creates an image that builds successfully but cannot boot.
+WORKDIR /app
+COPY --chmod=0444 .cli-flags.toml /app/.cli-flags.toml
 RUN chmod 0555 /usr/local/bin/lambda /usr/local/bin/entrypoint.sh
 USER lambda
 ENV PORT=8080 \
