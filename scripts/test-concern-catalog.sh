@@ -51,7 +51,7 @@ test ! -e "$conflict/.auth-shared.toml"
 blocked="$tmp-blocked"
 cp -R "$repo/config" "$blocked/config"
 cp "$repo/.ores-otel.toml" "$blocked/.ores-otel.toml"
-for concern in redis-lru forms opto-sync legal wasm rpc fanwaave; do
+for concern in redis-lru forms opto-sync legal wasm rpc fanwaave indiebuild sidecar; do
   if sh "$repo/scripts/enable-concern.sh" "$blocked" "$concern"; then
     echo "unadmitted concern unexpectedly materialized: $concern" >&2
     exit 1
