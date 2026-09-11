@@ -67,6 +67,23 @@ done
   exit 1
 }
 
+# Prove the isolation controls are effective in the running container rather
+# than merely trusting the docker run argv assembled above.
+uid=$(docker exec "$container" id -u)
+[ "$uid" != "0" ] || {
+  echo "runtime process unexpectedly executes as uid 0" >&2
+  exit 1
+}
+docker exec "$container" sh -c "grep -Eq '^NoNewPrivs:[[:space:]]+1$' /proc/1/status"
+docker exec "$container" sh -c "grep -Eq '^CapEff:[[:space:]]+0+$' /proc/1/status"
+docker exec "$container" sh -c 'test ! -w /app/.cli-flags.toml'
+docker exec "$container" sh -c 'test ! -w /usr/local/bin/lambda'
+if docker exec "$container" sh -c 'touch /app/runtime-rootfs-write-probe' >/dev/null 2>&1; then
+  echo "runtime root filesystem accepted an unexpected write" >&2
+  exit 1
+fi
+docker exec "$container" sh -c 'printf probe > /tmp/runtime-tmp-write-probe && test -s /tmp/runtime-tmp-write-probe && rm -f /tmp/runtime-tmp-write-probe'
+
 valid='{"provider":"local","requestId":"container-1","command":{"schemaVersion":"__PREFIX__.worker-command.v1","operation":"echo","payload":{"sentinel":"container-smoke-ok-82c4"}}}'
 status=$(curl --silent --show-error --max-time 3 --output "$work/valid.json" --write-out '%{http_code}' \
   --header 'Content-Type: application/json' --request POST --data "$valid" "$base/invoke")
