@@ -50,7 +50,7 @@ RUN chmod 0555 /usr/local/bin/lambda /usr/local/bin/entrypoint.sh \
 USER lambda
 ENV PORT=8080 \
     LAMBDA_SIDECAR_MODE=combined \
-    LAMBDA_SIDECAR_FAIL_MODE=open
+    LAMBDA_SIDECAR_FAIL_MODE=closed
 EXPOSE 8080
 ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/usr/local/bin/entrypoint.sh"]
 CMD ["/usr/local/bin/lambda"]
