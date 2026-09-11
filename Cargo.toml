@@ -33,6 +33,7 @@ flags2env = { git = "https://github.com/flags-2-env/flags-2-env", rev = "333c2ac
 tokio = { version = "1.46.1", features = ["macros", "rt-multi-thread"] }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
+toml = "0.8"
 
 [[bin]]
 name = "health"
