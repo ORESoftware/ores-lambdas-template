@@ -35,11 +35,20 @@ Today the template carries reviewed materializers for middleware, rate-limit, Re
 
 Middleware is materialized only when the generated repository already contains a regular `config/ores-middleware.stack.json` reviewed against the owner's `MiddlewareStackConfig` peer authority, because `.ores-mw.toml` references it via `stack_config`. The owner's `contracts/fixtures/stack.minimal.json` is a test fixture; stacks declaring `environment = "test"`, `test-auth-bypass`, or `fault-injection` are refused.
 
-To scaffold only the concerns a repository actually needs:
+To scaffold only the concerns a repository actually needs, scaffold the concerns that need no consumer input first, add the reviewed middleware stack, then enable middleware. `scaffold.sh` refuses an existing destination and does not copy `scripts/`, so middleware is enabled from this template checkout against the generated repository:
 
 ```sh
-ORES_LAMBDA_CONCERNS=middleware,rate-limit,redis-lru,chat,shared-auth \
+ORES_LAMBDA_CONCERNS=rate-limit,redis-lru,chat,shared-auth \
   scripts/scaffold.sh acme payments my-gcp-project
+
+# Consumer-owned production stack, reviewed against the owner's MiddlewareStackConfig
+# contract. Never copy the owner's contracts/fixtures/stack.minimal.json test fixture.
+mkdir -p ~/codes/acme/payments-lambdas/config
+cat > ~/codes/acme/payments-lambdas/config/ores-middleware.stack.json <<'JSON'
+{"contractVersion":"1.0.0","environment":"production","requiredCapabilities":["request-id","trace-context","auth"]}
+JSON
+
+scripts/enable-concern.sh ~/codes/acme/payments-lambdas middleware
 ```
 
 The normal Shared Auth selector writes `.shared-auth.toml`. `shared-auth-compat` writes the supported `.auth-shared.toml` alias for a repository that intentionally remains on that filename. Asking for both is an error.
