@@ -31,12 +31,14 @@ Only render a concern file when the generated lambda actually uses that concern.
 | `.ores-rpc.toml` | `ORESoftware/api-docs` RPC surface | RPC target, transport/framing and contract references. |
 | `.fanwaave-cfg.toml` | `fanwaave` | Fanwaave domain/runtime policy when used. |
 
-Today the template carries reviewed materializers for middleware, rate-limit, chat, and Shared Auth. The other optional names remain catalogued but fail closed until their owning repository publishes/admits the contract used by this template.
+Today the template carries reviewed materializers for middleware, rate-limit, Redis LRU cache (`redis-lru`, server role only, `ores-redis-lru-cache/ores-lru-redis-interfaces` `OresLruConfig`), chat, and Shared Auth. The other optional names remain catalogued but fail closed until their owning repository publishes/admits the contract used by this template.
+
+Middleware is materialized only when the generated repository already contains a regular `config/ores-middleware.stack.json` reviewed against the owner's `MiddlewareStackConfig` peer authority, because `.ores-mw.toml` references it via `stack_config`. The owner's `contracts/fixtures/stack.minimal.json` is a test fixture; stacks declaring `environment = "test"`, `test-auth-bypass`, or `fault-injection` are refused.
 
 To scaffold only the concerns a repository actually needs:
 
 ```sh
-ORES_LAMBDA_CONCERNS=middleware,rate-limit,chat,shared-auth \
+ORES_LAMBDA_CONCERNS=middleware,rate-limit,redis-lru,chat,shared-auth \
   scripts/scaffold.sh acme payments my-gcp-project
 ```
 
