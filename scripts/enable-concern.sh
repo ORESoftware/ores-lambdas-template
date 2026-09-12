@@ -47,7 +47,21 @@ for concern in $requested; do
       }
       ;;
     middleware)
+      # .ores-mw.toml references a consumer-owned stack JSON; never emit a dangling
+      # reference, and never admit a test-shaped stack into a deployable function.
+      stack="$root/config/ores-middleware.stack.json"
+      [ -f "$stack" ] && [ ! -L "$stack" ] || {
+        echo "middleware requires a reviewed, regular config/ores-middleware.stack.json (owner MiddlewareStackConfig)" >&2
+        exit 8
+      }
+      if grep -Eq '"environment"[[:space:]]*:[[:space:]]*"test"|test-auth-bypass|fault-injection' "$stack"; then
+        echo "refusing test-only middleware stack (environment=test, test-auth-bypass or fault-injection)" >&2
+        exit 8
+      fi
       copy_concern "$templates/ores-mw.toml" "$root/.ores-mw.toml"
+      ;;
+    redis-lru)
+      copy_concern "$templates/ores-lru.toml" "$root/.ores-lru.toml"
       ;;
     rate-limit)
       copy_concern "$templates/ores-rl.toml" "$root/.ores-rl.toml"
@@ -69,7 +83,7 @@ for concern in $requested; do
       }
       copy_concern "$templates/shared-auth.toml" "$root/.auth-shared.toml"
       ;;
-    redis-lru|forms|opto-sync|legal|wasm|rpc|fanwaave)
+    forms|opto-sync|legal|wasm|rpc|fanwaave)
       echo "concern '$concern' is catalogued but blocked until its owner schema/example is admitted" >&2
       exit 7
       ;;

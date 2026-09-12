@@ -3,10 +3,18 @@ set -eu
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp" "$tmp-compat" "$tmp-blocked" "$tmp-dst-link" "$tmp-src-link" "$tmp-dir-link" "$tmp-otel-link" "$tmp-outside"' EXIT INT TERM
+trap 'rm -rf "$tmp" "$tmp-compat" "$tmp-blocked" "$tmp-dst-link" "$tmp-src-link" "$tmp-dir-link" "$tmp-otel-link" "$tmp-outside" "$tmp-mw-missing" "$tmp-mw-test" "$tmp-mw-link" "$tmp-mw-link-src"' EXIT INT TERM
+
+# Consumer-owned production middleware stack stand-in; .ores-mw.toml references it.
+write_prod_stack() {
+  mkdir -p "$1/config"
+  printf '%s\n' '{"contractVersion":"1.0.0","environment":"production","requiredCapabilities":["request-id","trace-context","auth"]}' \
+    > "$1/config/ores-middleware.stack.json"
+}
 
 cp -R "$repo/config" "$tmp/config"
 cp "$repo/.ores-otel.toml" "$tmp/.ores-otel.toml"
+write_prod_stack "$tmp"
 
 python3 - "$repo/config/concerns/catalog.toml" <<'PY'
 import pathlib
@@ -76,18 +84,18 @@ shared = next(item for item in concerns if item["id"] == "shared-auth")
 assert shared["canonical_file"] == ".shared-auth.toml"
 assert shared.get("aliases") == [".auth-shared.toml"]
 
-for cid in ("rate-limit", "chat"):
+for cid in ("rate-limit", "chat", "redis-lru"):
     concern = next(item for item in concerns if item["id"] == cid)
     assert concern.get("tjsv_required") is True
 
 blocked = {
     item["id"] for item in concerns if item["mode"] == "owner-schema-required"
 }
-assert blocked == {"redis-lru", "forms", "opto-sync", "legal", "wasm", "rpc", "fanwaave"}
+assert blocked == {"forms", "opto-sync", "legal", "wasm", "rpc", "fanwaave"}
 PY
 
-sh "$repo/scripts/enable-concern.sh" "$tmp" "otel,middleware,rate-limit,chat,shared-auth"
-for file in .ores-otel.toml .ores-mw.toml .ores-rl.toml .ores-chat.toml .shared-auth.toml; do
+sh "$repo/scripts/enable-concern.sh" "$tmp" "otel,middleware,rate-limit,redis-lru,chat,shared-auth"
+for file in .ores-otel.toml .ores-mw.toml .ores-rl.toml .ores-lru.toml .ores-chat.toml .shared-auth.toml; do
   test -s "$tmp/$file"
 done
 test ! -e "$tmp/.auth-shared.toml"
@@ -112,7 +120,62 @@ assert chat["strict"] is True
 rate = tomllib.loads((root / ".ores-rl.toml").read_text(encoding="utf-8"))
 for policy in rate["policies"]:
     assert policy["backendFailureMode"] == "fail-closed"
+
+lru = tomllib.loads((root / ".ores-lru.toml").read_text(encoding="utf-8"))
+assert lru["protocol"] == "ores.lru-config.v1"
+assert lru["roles"] == ["server"], "a Lambda is a server-role LRU process only"
+assert all(cache["role"] == "server" for cache in lru["caches"])
+assert lru["defaults"]["failOpenOnStartup"] is False
+assert lru["redis"]["urlEnv"] == "REDIS_URL"
+redis_env = [entry for entry in lru["env"] if entry["key"] == "REDIS_URL"]
+assert len(redis_env) == 1
+assert redis_env[0]["secret"] is True and redis_env[0]["required"] is True
+assert "default" not in redis_env[0], "REDIS_URL must never carry a default"
+assert "redis://" not in (root / ".ores-lru.toml").read_text(encoding="utf-8")
+assert "rediss://" not in (root / ".ores-lru.toml").read_text(encoding="utf-8")
+
+mw = tomllib.loads((root / ".ores-mw.toml").read_text(encoding="utf-8"))
+for target in mw["targets"]:
+    assert target["stack_config"] == "config/ores-middleware.stack.json"
+    assert (root / target["stack_config"]).is_file()
 PY
+
+# Middleware must refuse a missing, test-shaped, or symlinked consumer stack.
+mw_missing="$tmp-mw-missing"
+mkdir -p "$mw_missing/config/concerns/templates"
+cp "$repo/config/concerns/templates/ores-mw.toml" "$mw_missing/config/concerns/templates/ores-mw.toml"
+if sh "$repo/scripts/enable-concern.sh" "$mw_missing" "middleware"; then
+  echo "middleware materialized without a consumer stack" >&2
+  exit 1
+fi
+test ! -e "$mw_missing/.ores-mw.toml"
+
+mw_test="$tmp-mw-test"
+for stack in \
+  '{"contractVersion":"1.0.0","environment":"test","requiredCapabilities":["request-id"]}' \
+  '{"contractVersion":"1.0.0","environment":"production","requiredCapabilities":["test-auth-bypass"]}' \
+  '{"contractVersion":"1.0.0","environment":"production","requiredCapabilities":["fault-injection"]}'; do
+  rm -rf "$mw_test"
+  mkdir -p "$mw_test/config/concerns/templates"
+  cp "$repo/config/concerns/templates/ores-mw.toml" "$mw_test/config/concerns/templates/ores-mw.toml"
+  printf '%s\n' "$stack" > "$mw_test/config/ores-middleware.stack.json"
+  if sh "$repo/scripts/enable-concern.sh" "$mw_test" "middleware"; then
+    echo "test-only middleware stack unexpectedly accepted: $stack" >&2
+    exit 1
+  fi
+  test ! -e "$mw_test/.ores-mw.toml"
+done
+
+mw_link="$tmp-mw-link"
+mkdir -p "$mw_link/config/concerns/templates"
+cp "$repo/config/concerns/templates/ores-mw.toml" "$mw_link/config/concerns/templates/ores-mw.toml"
+write_prod_stack "$tmp-mw-link-src"
+ln -s "$tmp-mw-link-src/config/ores-middleware.stack.json" "$mw_link/config/ores-middleware.stack.json"
+if sh "$repo/scripts/enable-concern.sh" "$mw_link" "middleware"; then
+  echo "symlinked middleware stack unexpectedly accepted" >&2
+  exit 1
+fi
+test ! -e "$mw_link/.ores-mw.toml"
 
 compat="$tmp-compat"
 mkdir -p "$compat/config/concerns/templates"
@@ -129,7 +192,7 @@ fi
 blocked="$tmp-blocked"
 mkdir -p "$blocked/config/concerns/templates"
 cp "$repo/.ores-otel.toml" "$blocked/.ores-otel.toml"
-for concern in redis-lru forms opto-sync legal wasm rpc fanwaave; do
+for concern in forms opto-sync legal wasm rpc fanwaave; do
   if sh "$repo/scripts/enable-concern.sh" "$blocked" "$concern"; then
     echo "unadmitted concern unexpectedly materialized: $concern" >&2
     exit 1
@@ -142,6 +205,8 @@ outside="$tmp-outside"
 mkdir -p "$dst_link/config/concerns/templates"
 cp "$repo/config/concerns/templates/ores-mw.toml" "$dst_link/config/concerns/templates/ores-mw.toml"
 cp "$repo/.ores-otel.toml" "$dst_link/.ores-otel.toml"
+# Valid stack so the refusal is attributable to the symlink guard, not a missing stack.
+write_prod_stack "$dst_link"
 ln -s "$outside" "$dst_link/.ores-mw.toml"
 if sh "$repo/scripts/enable-concern.sh" "$dst_link" "middleware"; then
   echo "dangling destination symlink unexpectedly accepted" >&2
@@ -153,6 +218,7 @@ test ! -e "$outside"
 src_link="$tmp-src-link"
 mkdir -p "$src_link/config/concerns/templates"
 cp "$repo/.ores-otel.toml" "$src_link/.ores-otel.toml"
+write_prod_stack "$src_link"
 ln -s "$repo/config/concerns/templates/ores-mw.toml" "$src_link/config/concerns/templates/ores-mw.toml"
 if sh "$repo/scripts/enable-concern.sh" "$src_link" "middleware"; then
   echo "symlinked concern template unexpectedly accepted" >&2
