@@ -1,0 +1,50 @@
+name: ores-cli policy canary
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ores-cli-policy-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ORESC_REV: 3d0b34bf8e93c382114bca888dbecddc32678b50
+  RUST_TOOLCHAIN: 1.95.0
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out consumer
+        uses: actions/checkout@v4
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+
+      - name: Fetch and build exact ores-cli candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          tool="$RUNNER_TEMP/ores-cli"
+          rm -rf "$tool"
+          git init "$tool"
+          git -C "$tool" remote add origin https://github.com/ORESoftware/ores-cli.git
+          git -C "$tool" fetch --depth=1 origin "$ORESC_REV"
+          git -C "$tool" checkout --detach FETCH_HEAD
+          test "$(git -C "$tool" rev-parse HEAD)" = "$ORESC_REV"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/oresc-target"
+          cargo +"$RUST_TOOLCHAIN" build --locked --manifest-path "$tool/Cargo.toml" --bin oresc
+          install -d "$RUNNER_TEMP/oresc-bin"
+          install -m 0755 "$CARGO_TARGET_DIR/debug/oresc" "$RUNNER_TEMP/oresc-bin/oresc"
+          echo "$RUNNER_TEMP/oresc-bin" >> "$GITHUB_PATH"
+
+      - name: Audit repository and root TOML contracts
+        run: oresc --no-json audit repo --path .
+
+      - name: Audit environment declaration/reference coverage
+        run: oresc --no-json audit env --path .
