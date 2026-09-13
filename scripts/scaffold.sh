@@ -1,11 +1,11 @@
 #!/bin/sh
 # Render this template into ~/codes/<org>/<prefix>-lambdas.
-# Usage: ORES_LAMBDA_CONCERNS=middleware,rate-limit,chat,shared-auth scripts/scaffold.sh <org> <prefix> [gcp-project]
+# Usage: ORES_LAMBDA_CONCERNS=middleware,rate-limit,redis-lru,chat,shared-auth scripts/scaffold.sh <org> <prefix> [gcp-project]
 set -eu
 
 [ "$#" -ge 2 ] && [ "$#" -le 3 ] || {
   echo "usage: scripts/scaffold.sh <org> <prefix> [gcp-project]" >&2
-  echo "optional: ORES_LAMBDA_CONCERNS=middleware,rate-limit,chat,shared-auth" >&2
+  echo "optional: ORES_LAMBDA_CONCERNS=middleware,rate-limit,redis-lru,chat,shared-auth" >&2
   exit 2
 }
 

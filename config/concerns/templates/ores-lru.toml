@@ -1,0 +1,43 @@
+# Derived from ores-redis-lru-cache/ores-lru-redis-interfaces
+# contracts/instances/OresLruConfig/valid/combined-client-server.json at
+# 42752563772e3af5a58cf17abc2f1deade4038b2 (TypeSpec contracts/typespec/main.tsp and
+# authored JSON Schema contracts/json-schema/authored.schema.json are the peer authorities).
+# A Lambda is a server-role process only. Secret-free: REDIS_URL is a secret supplied by the
+# runtime secret boundary and is never given a default here.
+protocol = "ores.lru-config.v1"
+namespace = "__PREFIX__-lambdas"
+roles = ["server"]
+
+[flags2env]
+contract = ".cli-flags.toml"
+requireAudit = true
+precedence = "argv-over-env"
+
+[[env]]
+name = "redis_url"
+key = "REDIS_URL"
+kind = "url"
+required = true
+secret = true
+description = "Redis credential URI supplied by the runtime secret boundary."
+
+[redis]
+urlEnv = "REDIS_URL"
+keyPrefix = "ores:lru:v1:__PREFIX__-lambdas"
+pubsubChannel = "ores:lru:v1:__PREFIX__-lambdas:events"
+reconcileIntervalMs = 180000
+reconnectMinMs = 1000
+reconnectMaxMs = 30000
+
+[defaults]
+capacity = 1024
+syncMode = "read_only"
+overflowMode = "reject_and_reconcile"
+failOpenOnStartup = false
+
+[[caches]]
+name = "runtime-env"
+role = "server"
+capacity = 1024
+syncMode = "read_only"
+overflowMode = "reject_and_reconcile"

@@ -47,16 +47,20 @@ source_revision = "52b7ac7fbf0c7c169684f613eda923f3aa6c82e9"
 mode = "optional"
 template = "config/concerns/templates/shared-auth.toml"
 
-# Recognized fleet contracts whose owner schema/example must be reviewed before
-# the template may materialize them. Cataloguing them lets audits detect their
-# filenames without fabricating semantics or silently enabling a dependency.
 [[concerns]]
 id = "redis-lru"
 canonical_file = ".ores-lru.toml"
-owner = "https://github.com/ores-redis-lru-cache"
-mode = "owner-schema-required"
-template = ""
+owner = "https://github.com/ores-redis-lru-cache/ores-lru-redis-interfaces"
+source_revision = "42752563772e3af5a58cf17abc2f1deade4038b2"
+mode = "optional"
+template = "config/concerns/templates/ores-lru.toml"
+tjsv_required = true
+typespec = "contracts/typespec/main.tsp"
+json_schema = "contracts/json-schema/authored.schema.json"
 
+# Recognized fleet contracts whose owner schema/example must be reviewed before
+# the template may materialize them. Cataloguing them lets audits detect their
+# filenames without fabricating semantics or silently enabling a dependency.
 [[concerns]]
 id = "forms"
 canonical_file = ".ores-forms.toml"
