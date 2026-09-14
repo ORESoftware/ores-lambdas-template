@@ -8,6 +8,7 @@ on:
       - 'scripts/oresc-audit.sh'
       - 'scripts/test-oresc-audit.sh'
       - 'scripts/test-concern-catalog.sh'
+      - 'scripts/test-lock-concern.sh'
       - 'scripts/scaffold.sh'
       - '.github/workflows/concern-contracts.yml'
   push:
@@ -18,6 +19,7 @@ on:
       - 'scripts/oresc-audit.sh'
       - 'scripts/test-oresc-audit.sh'
       - 'scripts/test-concern-catalog.sh'
+      - 'scripts/test-lock-concern.sh'
       - 'scripts/scaffold.sh'
       - '.github/workflows/concern-contracts.yml'
   workflow_dispatch:
@@ -49,6 +51,7 @@ jobs:
           bash -n scripts/test-oresc-audit.sh
           sh -n scripts/scaffold.sh
           sh -n scripts/test-concern-catalog.sh
+          sh -n scripts/test-lock-concern.sh
 
       - name: Exercise ores-cli audit wrapper contract
         shell: bash
@@ -56,7 +59,9 @@ jobs:
 
       - name: Exercise owner-derived concern contracts
         shell: bash
-        run: sh scripts/test-concern-catalog.sh
+        run: |
+          sh scripts/test-concern-catalog.sh
+          sh scripts/test-lock-concern.sh
 
       - name: Reject simultaneous Shared Auth canonical and compatibility filenames
         shell: bash
