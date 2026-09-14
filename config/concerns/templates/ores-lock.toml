@@ -1,0 +1,47 @@
+# Runtime lock/lease policy for a deployable Lambda/service consumer.
+# Package/build/install/publish mechanics belong in .zpkg.toml, not here.
+# Secrets are named as environment bindings and never stored in this file.
+schema_version = "ores.lock.config.v1"
+default_profile = "service-composed"
+
+[[env]]
+key = "FIDUCIA_BASE_URL"
+kind = "url"
+required = true
+secret = false
+purpose = "Fiducia lease authority endpoint."
+
+[[env]]
+key = "FIDUCIA_AUTH_TOKEN"
+kind = "string"
+required = true
+secret = true
+purpose = "Credential for the Fiducia lease authority."
+
+[[env]]
+key = "DATABASE_URL"
+kind = "string"
+required = true
+secret = true
+purpose = "PostgreSQL connection string used by the advisory-lock provider."
+
+[[profiles]]
+profile_id = "service-composed"
+wait = true
+wait_timeout_ms = 30000
+retry_interval_ms = 50
+ttl_ms = 30000
+renew_interval_ms = 10000
+
+[profiles.providers]
+local_file = false
+fiducia = true
+pg_advisory = true
+
+[profiles.fiducia]
+endpoint_env = "FIDUCIA_BASE_URL"
+auth_token_env = "FIDUCIA_AUTH_TOKEN"
+
+[profiles.postgres]
+database_url_env = "DATABASE_URL"
+scope = "transaction"
