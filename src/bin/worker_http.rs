@@ -2,11 +2,7 @@
 //! flags-2-env owns the argv boundary (.cli-flags.toml); PORT and FUNCTIONS_CUSTOMHANDLER_PORT are
 //! the platforms' contracts and are honoured through that contract, not read ad hoc.
 use flags2env::BundledFlags2Env;
-use std::{
-    collections::HashMap,
-    io,
-    path::PathBuf,
-};
+use std::{collections::HashMap, io, path::PathBuf};
 use __CRATE__::adapters::http::{detect_provider, router, HttpConfig};
 
 const CONTRACT_FILE: &str = ".cli-flags.toml";
@@ -37,7 +33,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let parsed = parser
         .parse_structured(&argv, Some(contract))
         .map_err(|_| invalid_input("flags2env parsing failed"))?;
-    if !parsed.unknown_options.is_empty() || !parsed.errors.is_empty() || !parsed.extras.is_empty() {
+    if !parsed.unknown_options.is_empty() || !parsed.errors.is_empty() || !parsed.extras.is_empty()
+    {
         return Err(invalid_input(format!(
             "invalid arguments: {} unknown option(s), {} parse error(s), {} positional extra(s)",
             parsed.unknown_options.len(),
@@ -72,7 +69,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn resolve_contract_path() -> Result<PathBuf, io::Error> {
-    if let Some(explicit) = std::env::var_os(CONTRACT_OVERRIDE_ENV).filter(|value| !value.is_empty()) {
+    if let Some(explicit) =
+        std::env::var_os(CONTRACT_OVERRIDE_ENV).filter(|value| !value.is_empty())
+    {
         let path = PathBuf::from(explicit);
         if !path.is_absolute() {
             return Err(invalid_input(format!(
