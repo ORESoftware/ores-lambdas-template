@@ -26,18 +26,32 @@ jobs:
           persist-credentials: false
           show-progress: false
 
+      - name: Require explicit cross-repository read credential
+        shell: bash
+        env:
+          ORES_CROSS_REPO_READ_TOKEN: ${{ secrets.ORES_CROSS_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${ORES_CROSS_REPO_READ_TOKEN:-}" ]]; then
+            echo '::error title=Missing cross-repo credential::ORES_CROSS_REPO_READ_TOKEN is required to fetch private ORESoftware/ores-cli. Configure a read-only fine-grained PAT or GitHub App token with contents:read for ores-cli.'
+            exit 1
+          fi
+
       - name: Install pinned Rust toolchain
         run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
 
       - name: Fetch and build exact ores-cli candidate
         shell: bash
+        env:
+          ORES_CROSS_REPO_READ_TOKEN: ${{ secrets.ORES_CROSS_REPO_READ_TOKEN }}
         run: |
           set -euo pipefail
           tool="$RUNNER_TEMP/ores-cli"
           rm -rf "$tool"
           git init "$tool"
           git -C "$tool" remote add origin https://github.com/ORESoftware/ores-cli.git
-          git -C "$tool" fetch --depth=1 origin "$ORESC_REV"
+          basic_auth="$(printf 'x-access-token:%s' "$ORES_CROSS_REPO_READ_TOKEN" | base64 -w0)"
+          git -C "$tool" -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $basic_auth" fetch --depth=1 origin "$ORESC_REV"
           git -C "$tool" checkout --detach FETCH_HEAD
           test "$(git -C "$tool" rev-parse HEAD)" = "$ORESC_REV"
           export CARGO_TARGET_DIR="$RUNNER_TEMP/oresc-target"
