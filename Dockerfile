@@ -48,7 +48,8 @@ COPY --chmod=0444 .cli-flags.toml /usr/local/share/ores-lambdas/.cli-flags.toml
 RUN chmod 0555 /usr/local/bin/lambda /usr/local/bin/entrypoint.sh
 WORKDIR /app
 USER lambda
-ENV PORT=8080 \
+ENV ORES_LAMBDAS_FLAGS_CONFIG=/usr/local/share/ores-lambdas/.cli-flags.toml \
+    PORT=8080 \
     LAMBDA_SIDECAR_MODE=combined \
     LAMBDA_SIDECAR_FAIL_MODE=open
 EXPOSE 8080
