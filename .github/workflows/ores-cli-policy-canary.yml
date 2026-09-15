@@ -26,13 +26,24 @@ jobs:
           persist-credentials: false
           show-progress: false
 
+      - name: Require private ores-cli read credential
+        shell: bash
+        env:
+          GH_READ_TOKEN: ${{ secrets.FLEET_GITHUB_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_READ_TOKEN:-}" ]; then
+            echo '::error::FLEET_GITHUB_READ_TOKEN is required to read the private ORESoftware/ores-cli canary source' >&2
+            exit 1
+          fi
+
       - name: Install pinned Rust toolchain
         run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
 
       - name: Fetch and build exact ores-cli candidate
         shell: bash
         env:
-          GH_READ_TOKEN: ${{ github.token }}
+          GH_READ_TOKEN: ${{ secrets.FLEET_GITHUB_READ_TOKEN }}
         run: |
           set -euo pipefail
           tool="$RUNNER_TEMP/ores-cli"
@@ -49,8 +60,12 @@ jobs:
           esac
           SH
           chmod 700 "$askpass"
-          GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 \
-            git -C "$tool" fetch --depth=1 origin "$ORESC_REV"
+          if ! GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 \
+            git -C "$tool" fetch --depth=1 origin "$ORESC_REV"; then
+            rm -f "$askpass"
+            echo '::error::FLEET_GITHUB_READ_TOKEN cannot read the pinned ORESoftware/ores-cli revision' >&2
+            exit 1
+          fi
           rm -f "$askpass"
           git -C "$tool" checkout --detach FETCH_HEAD
           test "$(git -C "$tool" rev-parse HEAD)" = "$ORESC_REV"
