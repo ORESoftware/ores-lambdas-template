@@ -31,13 +31,27 @@ jobs:
 
       - name: Fetch and build exact ores-cli candidate
         shell: bash
+        env:
+          GH_READ_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           tool="$RUNNER_TEMP/ores-cli"
+          askpass="$RUNNER_TEMP/ores-cli-askpass.sh"
           rm -rf "$tool"
           git init "$tool"
           git -C "$tool" remote add origin https://github.com/ORESoftware/ores-cli.git
-          git -C "$tool" fetch --depth=1 origin "$ORESC_REV"
+          cat >"$askpass" <<'SH'
+          #!/bin/sh
+          case "$1" in
+            *Username*) printf '%s\n' 'x-access-token' ;;
+            *Password*) printf '%s\n' "$GH_READ_TOKEN" ;;
+            *) exit 1 ;;
+          esac
+          SH
+          chmod 700 "$askpass"
+          GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 \
+            git -C "$tool" fetch --depth=1 origin "$ORESC_REV"
+          rm -f "$askpass"
           git -C "$tool" checkout --detach FETCH_HEAD
           test "$(git -C "$tool" rev-parse HEAD)" = "$ORESC_REV"
           export CARGO_TARGET_DIR="$RUNNER_TEMP/oresc-target"
