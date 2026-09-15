@@ -45,7 +45,8 @@ COPY --from=builder /out/lambda /usr/local/bin/lambda
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 # The worker resolves policy relative to its executable-owned install prefix.
 COPY --chmod=0444 .cli-flags.toml /usr/local/share/ores-lambdas/.cli-flags.toml
-RUN chmod 0555 /usr/local/bin/lambda /usr/local/bin/entrypoint.sh
+RUN chmod 0555 /usr/local/bin/lambda /usr/local/bin/entrypoint.sh /usr/local/share/ores-lambdas \
+    && chmod 0444 /usr/local/share/ores-lambdas/.cli-flags.toml
 WORKDIR /app
 USER lambda
 ENV ORES_LAMBDAS_FLAGS_CONFIG=/usr/local/share/ores-lambdas/.cli-flags.toml \
