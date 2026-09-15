@@ -37,28 +37,33 @@ jobs:
             exit 1
           fi
 
+      - name: Check out exact ores-cli candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ORESoftware/ores-cli
+          ref: ${{ env.ORESC_REV }}
+          token: ${{ secrets.ORES_CROSS_REPO_READ_TOKEN }}
+          path: .ci/ores-cli
+          persist-credentials: false
+          fetch-depth: 1
+          show-progress: false
+
       - name: Install pinned Rust toolchain
         run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
 
-      - name: Fetch and build exact ores-cli candidate
+      - name: Build exact ores-cli candidate
         shell: bash
-        env:
-          ORES_CROSS_REPO_READ_TOKEN: ${{ secrets.ORES_CROSS_REPO_READ_TOKEN }}
         run: |
           set -euo pipefail
-          tool="$RUNNER_TEMP/ores-cli"
-          rm -rf "$tool"
-          git init "$tool"
-          git -C "$tool" remote add origin https://github.com/ORESoftware/ores-cli.git
-          basic_auth="$(printf 'x-access-token:%s' "$ORES_CROSS_REPO_READ_TOKEN" | base64 -w0)"
-          git -C "$tool" -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $basic_auth" fetch --depth=1 origin "$ORESC_REV"
-          git -C "$tool" checkout --detach FETCH_HEAD
+          tool="$GITHUB_WORKSPACE/.ci/ores-cli"
           test "$(git -C "$tool" rev-parse HEAD)" = "$ORESC_REV"
+          test -z "$(git -C "$tool" status --porcelain)"
           export CARGO_TARGET_DIR="$RUNNER_TEMP/oresc-target"
           cargo +"$RUST_TOOLCHAIN" build --locked --manifest-path "$tool/Cargo.toml" --bin oresc
           install -d "$RUNNER_TEMP/oresc-bin"
           install -m 0755 "$CARGO_TARGET_DIR/debug/oresc" "$RUNNER_TEMP/oresc-bin/oresc"
           echo "$RUNNER_TEMP/oresc-bin" >> "$GITHUB_PATH"
+          rm -rf "$GITHUB_WORKSPACE/.ci"
 
       - name: Audit repository and root TOML contracts
         run: oresc --no-json audit repo --path .
