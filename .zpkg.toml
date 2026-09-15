@@ -5,7 +5,6 @@ version = "0.1.0"
 description = "Provider-neutral serverless functions for __ORG__"
 license = "MIT"
 language = "rust"
-kind = "rust-lambdas"
 
 [package.repository]
 vcs = "git"
