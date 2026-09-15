@@ -29,11 +29,11 @@ jobs:
       - name: Require explicit cross-repository read credential
         shell: bash
         env:
-          ORES_CROSS_REPO_READ_TOKEN: ${{ secrets.ORES_CROSS_REPO_READ_TOKEN }}
+          CROSS_REPO_READ_TOKEN: ${{ secrets.ORES_CROSS_REPO_READ_TOKEN || secrets.TEST_FLEET_READ_TOKEN }}
         run: |
           set -euo pipefail
-          if [[ -z "${ORES_CROSS_REPO_READ_TOKEN:-}" ]]; then
-            echo '::error title=Missing cross-repo credential::ORES_CROSS_REPO_READ_TOKEN is required to fetch private ORESoftware/ores-cli. Configure a read-only fine-grained PAT or GitHub App token with contents:read for ores-cli.'
+          if [[ -z "${CROSS_REPO_READ_TOKEN:-}" ]]; then
+            echo '::error title=Missing cross-repo credential::ORES_CROSS_REPO_READ_TOKEN or the established TEST_FLEET_READ_TOKEN is required to fetch private ORESoftware/ores-cli. Configure a read-only fine-grained PAT or GitHub App token with contents:read for ores-cli.'
             exit 1
           fi
 
@@ -42,7 +42,7 @@ jobs:
         with:
           repository: ORESoftware/ores-cli
           ref: ${{ env.ORESC_REV }}
-          token: ${{ secrets.ORES_CROSS_REPO_READ_TOKEN }}
+          token: ${{ secrets.ORES_CROSS_REPO_READ_TOKEN || secrets.TEST_FLEET_READ_TOKEN }}
           path: .ci/ores-cli
           persist-credentials: false
           fetch-depth: 1
