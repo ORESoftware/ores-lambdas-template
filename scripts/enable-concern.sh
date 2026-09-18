@@ -66,6 +66,9 @@ for concern in $requested; do
     rate-limit)
       copy_concern "$templates/ores-rl.toml" "$root/.ores-rl.toml"
       ;;
+    locks)
+      copy_concern "$templates/ores-lock.toml" "$root/.ores-lock.toml"
+      ;;
     chat)
       copy_concern "$templates/ores-chat.toml" "$root/.ores-chat.toml"
       ;;

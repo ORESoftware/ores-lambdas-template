@@ -28,6 +28,17 @@ typespec = "contracts/authorities/typespec/rate-limit-config.v1.tsp"
 json_schema = "contracts/authorities/json-schema/rate-limit-config.v1.schema.json"
 
 [[concerns]]
+id = "locks"
+canonical_file = ".ores-lock.toml"
+owner = "https://github.com/ORESoftware/ores-locks-and-leases"
+source_revision = "b800f5f9a5fec829af2849bbc8252fb58e845cbd"
+mode = "optional"
+template = "config/concerns/templates/ores-lock.toml"
+tjsv_required = true
+typespec = "contracts/lock-config/typespec/main.tsp"
+json_schema = "contracts/lock-config/json-schema/contract.schema.json"
+
+[[concerns]]
 id = "chat"
 canonical_file = ".ores-chat.toml"
 owner = "https://github.com/ores-chat/ores-chat-interfaces"
