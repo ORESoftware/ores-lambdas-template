@@ -61,7 +61,8 @@ async fn from_request(request: Request<Body>) -> Result<PageHttpRequest, Respons
     let bytes = to_bytes(body, MAX_PAGE_BODY_BYTES)
         .await
         .map_err(|_| text_response(413, "request body too large"))?;
-    let cookies = parse_cookie_headers(headers.remove("cookie"))?;
+    let cookies = parse_cookie_headers(headers.remove("cookie"))
+        .map_err(|error| text_response(400, error.message()))?;
 
     // Generic Cloud Run HTTP headers are client-controllable. Until the hosting
     // layer passes authenticated platform metadata out-of-band, do not promote
@@ -78,7 +79,22 @@ async fn from_request(request: Request<Body>) -> Result<PageHttpRequest, Respons
     })
 }
 
-fn parse_cookie_headers(values: Option<Vec<String>>) -> Result<Vec<String>, Response<Body>> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CookieHeaderError {
+    Invalid,
+    TooMany,
+}
+
+impl CookieHeaderError {
+    const fn message(self) -> &'static str {
+        match self {
+            Self::Invalid => "invalid request cookies",
+            Self::TooMany => "too many request cookies",
+        }
+    }
+}
+
+fn parse_cookie_headers(values: Option<Vec<String>>) -> Result<Vec<String>, CookieHeaderError> {
     let Some(values) = values else {
         return Ok(Vec::new());
     };
@@ -87,7 +103,7 @@ fn parse_cookie_headers(values: Option<Vec<String>>) -> Result<Vec<String>, Resp
         if value.len() > MAX_COOKIE_BYTES
             || value.bytes().any(|byte| matches!(byte, b'\r' | b'\n' | 0))
         {
-            return Err(text_response(400, "invalid request cookies"));
+            return Err(CookieHeaderError::Invalid);
         }
         for cookie in value
             .split(';')
@@ -96,7 +112,7 @@ fn parse_cookie_headers(values: Option<Vec<String>>) -> Result<Vec<String>, Resp
         {
             cookies.push(cookie.to_owned());
             if cookies.len() > MAX_COOKIE_COUNT {
-                return Err(text_response(400, "too many request cookies"));
+                return Err(CookieHeaderError::TooMany);
             }
         }
     }
@@ -188,6 +204,18 @@ mod tests {
         let normalized = from_request(request).await.unwrap();
         assert!(!normalized.headers.contains_key("cookie"));
         assert_eq!(normalized.cookies, vec!["a=1", "b=2"]);
+    }
+
+    #[test]
+    fn cookie_parser_returns_small_typed_errors() {
+        assert_eq!(
+            parse_cookie_headers(Some(vec!["x".repeat(MAX_COOKIE_BYTES + 1)])),
+            Err(CookieHeaderError::Invalid)
+        );
+        assert_eq!(
+            parse_cookie_headers(Some(vec!["x=1;".repeat(MAX_COOKIE_COUNT + 1)])),
+            Err(CookieHeaderError::TooMany)
+        );
     }
 
     #[test]
