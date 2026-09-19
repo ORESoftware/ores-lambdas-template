@@ -320,7 +320,10 @@ fn match_pattern(
     let mut params = BTreeMap::new();
     let mut request_index = 0;
     for (index, part) in parts.iter().enumerate() {
-        if let Some(name) = part.strip_prefix("{*").and_then(|value| value.strip_suffix('}')) {
+        if let Some(name) = part
+            .strip_prefix("{*")
+            .and_then(|value| value.strip_suffix('}'))
+        {
             if name.is_empty() || index + 1 != parts.len() || request_index >= request.len() {
                 return Ok(None);
             }
@@ -331,7 +334,10 @@ fn match_pattern(
         let Some(actual) = request.get(request_index) else {
             return Ok(None);
         };
-        if let Some(name) = part.strip_prefix('{').and_then(|value| value.strip_suffix('}')) {
+        if let Some(name) = part
+            .strip_prefix('{')
+            .and_then(|value| value.strip_suffix('}'))
+        {
             if name.is_empty() || name.starts_with('*') {
                 return Err(());
             }
