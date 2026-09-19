@@ -8,7 +8,7 @@
 use ores_api_docs_client::{
     PageContext, PageFinalizeFn, PageFn, PageLambdaStateError, PageResponseRequestHints, PageState,
 };
-use std::{collections::BTreeMap, fmt, future::Future};
+use std::{collections::BTreeMap, fmt};
 
 pub const MAX_PAGE_BODY_BYTES: usize = 64 * 1024;
 const ERROR_CONTENT_TYPE: &str = "text/plain; charset=utf-8";
@@ -17,6 +17,7 @@ const ERROR_CONTENT_TYPE: &str = "text/plain; charset=utf-8";
 pub enum PageHttpMethod {
     Get,
     Head,
+    Unsupported,
 }
 
 #[derive(Debug, Clone)]
@@ -26,7 +27,7 @@ pub struct IngressProvenance {
 }
 
 impl IngressProvenance {
-    fn provider(provider: &'static str, request_id: impl Into<String>) -> Self {
+    pub(crate) fn provider(provider: &'static str, request_id: impl Into<String>) -> Self {
         Self {
             provider,
             request_id: request_id.into(),
@@ -64,7 +65,7 @@ pub struct PageHttpResponse {
 }
 
 impl PageHttpResponse {
-    fn text(status: u16, message: &'static str) -> Self {
+    pub(crate) fn text(status: u16, message: &'static str) -> Self {
         Self {
             status,
             headers: vec![
@@ -80,7 +81,10 @@ impl PageHttpResponse {
 #[derive(Debug)]
 pub enum RuntimeError {
     StateInit(PageLambdaStateError),
-    Provider { provider: &'static str, message: String },
+    Provider {
+        provider: &'static str,
+        _message: String,
+    },
 }
 
 impl RuntimeError {
@@ -89,10 +93,10 @@ impl RuntimeError {
         Self::StateInit(error)
     }
 
-    fn provider(provider: &'static str, error: impl fmt::Display) -> Self {
+    pub(crate) fn provider(provider: &'static str, error: impl fmt::Display) -> Self {
         Self::Provider {
             provider,
-            message: error.to_string(),
+            _message: error.to_string(),
         }
     }
 }
@@ -100,7 +104,6 @@ impl RuntimeError {
 impl fmt::Display for RuntimeError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            // Do not place state-construction details in a response-shaped error.
             Self::StateInit(_) => formatter.write_str("page lambda state initialization failed"),
             Self::Provider { provider, .. } => write!(formatter, "{provider} page host failed"),
         }
@@ -128,11 +131,17 @@ pub async fn invoke_page(
     page: PageFn,
     finalize: PageFinalizeFn,
 ) -> Result<PageHttpResponse, RuntimeError> {
+    if request.method == PageHttpMethod::Unsupported {
+        return Ok(PageHttpResponse::text(405, "method not allowed"));
+    }
     if request.body.len() > MAX_PAGE_BODY_BYTES {
         return Ok(PageHttpResponse::text(413, "request body too large"));
     }
     if !request.body.is_empty() {
-        return Ok(PageHttpResponse::text(400, "GET/HEAD request body is not allowed"));
+        return Ok(PageHttpResponse::text(
+            400,
+            "GET/HEAD request body is not allowed",
+        ));
     }
 
     let params = match match_any_path(&request.raw_path, axum_paths) {
@@ -182,7 +191,11 @@ pub async fn invoke_page(
 fn ambiguous_sensitive_header(headers: &BTreeMap<String, Vec<String>>) -> bool {
     ["host", "authorization", "content-length"]
         .iter()
-        .any(|name| headers.get(*name).is_some_and(|values| values.len() != 1))
+        .any(|name| {
+            headers.get(*name).is_some_and(|values| {
+                values.len() != 1 || values.first().is_some_and(|value| value.contains(','))
+            })
+        })
 }
 
 fn single_header<'a>(headers: &'a BTreeMap<String, Vec<String>>, name: &str) -> Option<&'a str> {
@@ -190,22 +203,41 @@ fn single_header<'a>(headers: &'a BTreeMap<String, Vec<String>>, name: &str) -> 
     (values.len() == 1).then(|| values[0].as_str())
 }
 
-fn normalize_header(
+pub(crate) fn normalize_header(
     headers: &mut BTreeMap<String, Vec<String>>,
     name: &str,
     value: &str,
 ) -> Result<(), ()> {
     let name = name.to_ascii_lowercase();
     if name.is_empty()
-        || !name
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        || !name.bytes().all(http_token_byte)
         || value.bytes().any(|byte| matches!(byte, b'\r' | b'\n' | 0))
     {
         return Err(());
     }
     headers.entry(name).or_default().push(value.to_owned());
     Ok(())
+}
+
+fn http_token_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric()
+        || matches!(
+            byte,
+            b'!' | b'#'
+                | b'$'
+                | b'%'
+                | b'&'
+                | b'\''
+                | b'*'
+                | b'+'
+                | b'-'
+                | b'.'
+                | b'^'
+                | b'_'
+                | b'`'
+                | b'|'
+                | b'~'
+        )
 }
 
 fn match_any_path(
@@ -222,7 +254,7 @@ fn match_any_path(
 }
 
 fn decode_path_segments(raw_path: &str) -> Result<Vec<String>, ()> {
-    if !raw_path.starts_with('/') || raw_path.contains(['?', '#']) {
+    if !raw_path.starts_with('/') || raw_path.contains('?') || raw_path.contains('#') {
         return Err(());
     }
     if raw_path == "/" {
@@ -288,7 +320,7 @@ fn match_pattern(
     let mut params = BTreeMap::new();
     let mut request_index = 0;
     for (index, part) in parts.iter().enumerate() {
-        if let Some(name) = part.strip_prefix("{*").and_then(|v| v.strip_suffix('}')) {
+        if let Some(name) = part.strip_prefix("{*").and_then(|value| value.strip_suffix('}')) {
             if name.is_empty() || index + 1 != parts.len() || request_index >= request.len() {
                 return Ok(None);
             }
@@ -299,7 +331,7 @@ fn match_pattern(
         let Some(actual) = request.get(request_index) else {
             return Ok(None);
         };
-        if let Some(name) = part.strip_prefix('{').and_then(|v| v.strip_suffix('}')) {
+        if let Some(name) = part.strip_prefix('{').and_then(|value| value.strip_suffix('}')) {
             if name.is_empty() || name.starts_with('*') {
                 return Err(());
             }
@@ -317,253 +349,9 @@ fn match_pattern(
 }
 
 #[cfg(feature = "page-aws")]
-pub mod aws {
-    use super::*;
-    use base64::{engine::general_purpose::STANDARD, Engine as _};
-    use lambda_runtime::{service_fn, LambdaEvent};
-    use serde_json::{json, Map, Value};
-
-    pub async fn run_page<H, Fut>(state: PageState, handler: H) -> Result<(), RuntimeError>
-    where
-        H: Fn(PageState, PageHttpRequest) -> Fut + Clone + Send + Sync + 'static,
-        Fut: Future<Output = Result<PageHttpResponse, RuntimeError>> + Send + 'static,
-    {
-        lambda_runtime::run(service_fn(move |event: LambdaEvent<Value>| {
-            let state = state.clone();
-            let handler = handler.clone();
-            async move {
-                let request = from_event(event)?;
-                let response = handler(state, request).await?;
-                Ok::<Value, RuntimeError>(to_event(response))
-            }
-        }))
-        .await
-        .map_err(|error| RuntimeError::provider("aws", error))
-    }
-
-    fn from_event(event: LambdaEvent<Value>) -> Result<PageHttpRequest, RuntimeError> {
-        let value = event.payload;
-        let method = value
-            .pointer("/requestContext/http/method")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let method = match method {
-            "GET" => PageHttpMethod::Get,
-            "HEAD" => PageHttpMethod::Head,
-            _ => return Ok(rejected_request("aws", "method-not-admitted")),
-        };
-        let raw_path = value.get("rawPath").and_then(Value::as_str).unwrap_or("/");
-        let raw_query = value
-            .get("rawQueryString")
-            .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
-            .map(ToOwned::to_owned);
-        let request_id = value
-            .pointer("/requestContext/requestId")
-            .and_then(Value::as_str)
-            .unwrap_or("request");
-
-        let mut headers = BTreeMap::new();
-        if let Some(object) = value.get("headers").and_then(Value::as_object) {
-            for (name, value) in object {
-                let Some(value) = value.as_str() else {
-                    return Err(RuntimeError::provider("aws", "non-string header"));
-                };
-                normalize_header(&mut headers, name, value)
-                    .map_err(|()| RuntimeError::provider("aws", "invalid header"))?;
-            }
-        }
-        let cookies = value
-            .get("cookies")
-            .and_then(Value::as_array)
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(ToOwned::to_owned)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-
-        let encoded = value.get("body").and_then(Value::as_str).unwrap_or_default();
-        if encoded.len() > MAX_PAGE_BODY_BYTES.saturating_mul(2) {
-            return Err(RuntimeError::provider("aws", "encoded request body too large"));
-        }
-        let body = if value
-            .get("isBase64Encoded")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-        {
-            STANDARD
-                .decode(encoded)
-                .map_err(|_| RuntimeError::provider("aws", "invalid base64 request body"))?
-        } else {
-            encoded.as_bytes().to_vec()
-        };
-
-        Ok(PageHttpRequest {
-            method,
-            raw_path: raw_path.to_owned(),
-            raw_query,
-            headers,
-            cookies,
-            body,
-            provenance: IngressProvenance::provider("aws", request_id),
-        })
-    }
-
-    // A sentinel request that the shared admission layer deterministically
-    // rejects before page invocation. Provider envelopes with unsupported
-    // methods therefore never reach product code.
-    fn rejected_request(provider: &'static str, request_id: &str) -> PageHttpRequest {
-        PageHttpRequest {
-            method: PageHttpMethod::Get,
-            raw_path: String::new(),
-            raw_query: None,
-            headers: BTreeMap::new(),
-            cookies: Vec::new(),
-            body: Vec::new(),
-            provenance: IngressProvenance::provider(provider, request_id),
-        }
-    }
-
-    fn to_event(response: PageHttpResponse) -> Value {
-        let mut grouped = BTreeMap::<String, Vec<String>>::new();
-        for (name, value) in response.headers {
-            grouped.entry(name).or_default().push(value);
-        }
-        let mut headers = Map::new();
-        for (name, values) in grouped {
-            headers.insert(name, Value::String(values.join(",")));
-        }
-        json!({
-            "statusCode": response.status,
-            "headers": headers,
-            "cookies": response.set_cookies,
-            "body": STANDARD.encode(response.body),
-            "isBase64Encoded": true
-        })
-    }
-}
-
+pub mod aws;
 #[cfg(feature = "page-gcp")]
-pub mod gcp {
-    use super::*;
-    use axum::{
-        body::{to_bytes, Body},
-        http::{HeaderName, HeaderValue, Request, Response, StatusCode},
-        routing::any,
-        Router,
-    };
-
-    pub async fn run_page<H, Fut>(state: PageState, handler: H) -> Result<(), RuntimeError>
-    where
-        H: Fn(PageState, PageHttpRequest) -> Fut + Clone + Send + Sync + 'static,
-        Fut: Future<Output = Result<PageHttpResponse, RuntimeError>> + Send + 'static,
-    {
-        let app = Router::new().fallback(any(move |request: Request<Body>| {
-            let state = state.clone();
-            let handler = handler.clone();
-            async move {
-                match from_request(request).await {
-                    Ok(request) => match handler(state, request).await {
-                        Ok(response) => to_response(response),
-                        Err(_) => stable_internal_error(),
-                    },
-                    Err(response) => response,
-                }
-            }
-        }));
-        let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_owned());
-        let address = format!("0.0.0.0:{port}");
-        let listener = tokio::net::TcpListener::bind(&address)
-            .await
-            .map_err(|error| RuntimeError::provider("gcp", error))?;
-        axum::serve(listener, app)
-            .await
-            .map_err(|error| RuntimeError::provider("gcp", error))
-    }
-
-    async fn from_request(request: Request<Body>) -> Result<PageHttpRequest, Response<Body>> {
-        let (parts, body) = request.into_parts();
-        let method = match parts.method.as_str() {
-            "GET" => PageHttpMethod::Get,
-            "HEAD" => PageHttpMethod::Head,
-            _ => return Err(text_response(405, "method not allowed")),
-        };
-        let mut headers = BTreeMap::new();
-        for (name, value) in &parts.headers {
-            let Ok(value) = value.to_str() else {
-                return Err(text_response(400, "invalid request headers"));
-            };
-            if normalize_header(&mut headers, name.as_str(), value).is_err() {
-                return Err(text_response(400, "invalid request headers"));
-            }
-        }
-        let bytes = to_bytes(body, MAX_PAGE_BODY_BYTES + 1)
-            .await
-            .map_err(|_| text_response(400, "invalid request body"))?;
-        if bytes.len() > MAX_PAGE_BODY_BYTES {
-            return Err(text_response(413, "request body too large"));
-        }
-        let cookies = headers.get("cookie").cloned().unwrap_or_default();
-        headers.remove("cookie");
-        let request_id = headers
-            .get("x-cloud-trace-context")
-            .and_then(|values| values.first())
-            .cloned()
-            .unwrap_or_else(|| "request".to_owned());
-        Ok(PageHttpRequest {
-            method,
-            raw_path: parts.uri.path().to_owned(),
-            raw_query: parts.uri.query().map(ToOwned::to_owned),
-            headers,
-            cookies,
-            body: bytes.to_vec(),
-            provenance: IngressProvenance::provider("gcp", request_id),
-        })
-    }
-
-    fn to_response(response: PageHttpResponse) -> Response<Body> {
-        let mut builder = Response::builder().status(response.status);
-        if let Some(headers) = builder.headers_mut() {
-            for (name, value) in response.headers {
-                let Ok(name) = HeaderName::try_from(name) else {
-                    return stable_internal_error();
-                };
-                let Ok(value) = HeaderValue::try_from(value) else {
-                    return stable_internal_error();
-                };
-                headers.append(name, value);
-            }
-            for cookie in response.set_cookies {
-                let Ok(value) = HeaderValue::try_from(cookie) else {
-                    return stable_internal_error();
-                };
-                headers.append(axum::http::header::SET_COOKIE, value);
-            }
-        }
-        builder.body(Body::from(response.body)).unwrap_or_else(|_| stable_internal_error())
-    }
-
-    fn text_response(status: u16, message: &'static str) -> Response<Body> {
-        Response::builder()
-            .status(StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR))
-            .header("content-type", ERROR_CONTENT_TYPE)
-            .header("cache-control", "no-store")
-            .body(Body::from(message))
-            .unwrap_or_else(|_| stable_internal_error())
-    }
-
-    fn stable_internal_error() -> Response<Body> {
-        Response::builder()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .header("content-type", ERROR_CONTENT_TYPE)
-            .header("cache-control", "no-store")
-            .body(Body::from("page host failed"))
-            .expect("static error response is valid")
-    }
-}
+pub mod gcp;
 
 #[cfg(test)]
 mod tests {
@@ -637,6 +425,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unsupported_method_fails_before_page_invocation() {
+        let response = invoke_page(
+            request(PageHttpMethod::Unsupported, "/users/42"),
+            PageState::default(),
+            "/users/{id}",
+            &["/users/{id}"],
+            page,
+            finalize,
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status, 405);
+    }
+
+    #[tokio::test]
     async fn head_runs_same_page_and_finalizer_then_drops_body() {
         let response = invoke_page(
             request(PageHttpMethod::Head, "/users/42"),
@@ -650,7 +453,29 @@ mod tests {
         .unwrap();
         assert_eq!(response.status, 200);
         assert!(response.body.is_empty());
-        assert_eq!(response.headers, vec![("content-type".to_owned(), "text/html".to_owned())]);
+        assert_eq!(
+            response.headers,
+            vec![("content-type".to_owned(), "text/html".to_owned())]
+        );
+    }
+
+    #[tokio::test]
+    async fn coalesced_sensitive_header_is_rejected() {
+        let mut request = request(PageHttpMethod::Get, "/users/42");
+        request
+            .headers
+            .insert("authorization".to_owned(), vec!["a,b".to_owned()]);
+        let response = invoke_page(
+            request,
+            PageState::default(),
+            "/users/{id}",
+            &["/users/{id}"],
+            page,
+            finalize,
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status, 400);
     }
 
     #[test]
