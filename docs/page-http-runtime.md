@@ -36,18 +36,25 @@ over any older wording elsewhere in the set.
    from the validated `src/pages/**/page.rs` inventory (`page_router_glue`); no
    server walks the filesystem while serving. `ores-stack dev` re-runs discovery
    when a `page.rs`/`gen.rs` is added, moved or removed.
-6. **`lambda.rs` reaches the page through the web-server library, never by
-   `#[path = "page.rs"]`.** `lambda.rs` is its own bin crate root, so re-mounting
-   the page would make every `crate::` path inside it resolve against the Lambda
-   bin. The build unit aliases the product crate to `ores_web_app` and the org's
-   `*-lambdas` crate to `ores_page_lambda_runtime`; the generated source names
-   neither organization. The web-server lib must export `pub mod ores_pages`
-   (the generated page glue) and `pub async fn ores_page_lambda_state()`.
-7. **Application state is explicit.** `PageContext` carries type-erased state
-   (`PageState`); the standalone router gets it from Axum `State<S>`. A page
-   Lambda has no router, so generated `main` builds it once per cold start via
-   `ores_page_lambda_state()` and hands it to `run_page`. Same constructor as the
-   standalone server, or the two hosts drift.
+6. **`lambda.rs` reaches the page through one generated trampoline in the
+   web-server library, never by `#[path = "page.rs"]`.** `lambda.rs` is its own
+   bin crate root, so re-mounting the page would make every `crate::` path inside
+   it resolve against the Lambda bin. Page modules stay **private**; the page
+   glue emits one `#[doc(hidden)] pub fn __ores_invoke_page_<stem>_<sha256/16>`
+   per page and `lambda.rs` names only that. The digest suffix makes the name
+   injective (`a-b` and `a_b` share a readable stem). The build unit aliases the
+   product crate to `ores_web_app` and the org `*-lambdas` crate to
+   `ores_page_lambda_runtime`; generated source names neither organization. The
+   web-server lib exports `pub mod ores_pages` (the generated glue) and
+   `pub fn ores_page_lambda_state() -> PageLambdaStateFuture`.
+7. **Application state is an explicit, typed ABI.** `PageContext` carries
+   type-erased `PageState`; the standalone router gets it from Axum `State<S>`.
+   A page Lambda has no router, so generated `main` calls
+   `ores_page_lambda_state` (`ores_api_docs_client::PageLambdaStateFn`) once per
+   cold start and hands the result to `run_page`. `lambda.rs` assigns both the
+   trampoline and the state function to `const`s of their ABI types, so a library
+   missing either surface fails the build, not the first request. It must be the
+   same constructor the standalone server uses, or the two hosts drift.
 8. **One page per Lambda first.** `lambda_route_group` stays in the deployment
    IR as a reserved shape but is not generated until per-page parity is proven;
    a grouped artifact would need a multi-route matcher and breaks the 1:1
@@ -56,6 +63,12 @@ over any older wording elsewhere in the set.
    digests) is baked into the generated Axum handlers today. It must be extracted
    into an Axum-free function both hosts call before a page Lambda can return the
    same bytes as the standalone server. This is the first implementation slice.
+10. **A page never acquires RPC-operation identity.** The page manifest records
+    what a page calls as `rpc_dependencies[]`, never `rpc_operations[]`.
+11. **A build unit is its own Cargo workspace root.** `generated/web/lambda/<unit>/Cargo.toml`
+    carries an empty `[workspace]` table so it is never absorbed by, or rejected
+    from, the product workspace. Its `Cargo.lock` is seeded from the product lock
+    by `web lambda sync`, committed, and every build runs `--locked`.
 
 ### Fleet baseline (read-only audit of the local checkouts, 2026-09-19)
 
@@ -101,34 +114,74 @@ Conceptually:
 
 ```rust
 pub struct PageHttpRequest {
-    pub method: HttpMethod,
-    pub path: String,
-    pub query: Option<String>,
-    pub headers: Vec<(String, Vec<u8>)>,
-    pub body: Vec<u8>,
-    pub ingress: IngressProvenance,
+    pub method: HttpMethod,             // GET | HEAD admitted first; others rejected before the page
+    pub raw_path: String,               // exactly as received, still percent-encoded
+    pub raw_query: Option<String>,      // exactly as received, never re-encoded
+    pub headers: ClientHeaders,         // untrusted; multi-valued; lowercase names
+    pub body: Vec<u8>,                  // already base64-decoded, already size-bounded
+    pub provenance: IngressProvenance,  // trusted; built only by a provider adapter
     pub request_id: String,
 }
 
 pub struct PageHttpResponse {
     pub status: u16,
-    pub headers: Vec<(String, String)>,
+    pub headers: Vec<(String, String)>, // ordered; repeated names allowed
+    pub set_cookies: Vec<String>,       // never folded into one header
     pub body: Vec<u8>,
 }
 
-pub async fn invoke_page<F, Fut>(
+pub async fn invoke_page(
     request: PageHttpRequest,
     state: PageState,
     canonical_route: &'static str,
     axum_paths: &'static [&'static str],
-    page: F,
-) -> Result<PageHttpResponse, RuntimeError>
-where
-    F: FnOnce(PageContext) -> Fut,
-    Fut: Future<Output = PageResult>;
+    page: ores_api_docs_client::PageFn,
+) -> Result<PageHttpResponse, RuntimeError>;
+
+impl RuntimeError {
+    pub fn state_init(error: ores_api_docs_client::PageLambdaStateError) -> Self;
+}
+
+pub mod aws { pub async fn run_page<H, Fut>(state: PageState, handler: H) -> Result<(), RuntimeError>; }
+pub mod gcp { pub async fn run_page<H, Fut>(state: PageState, handler: H) -> Result<(), RuntimeError>; }
 ```
 
+`page` is a plain `PageFn`, not a closure: generated `lambda.rs` passes the one trampoline the web-server library exports (`api-docs#176`), and `state` comes from the library's typed `ores_page_lambda_state`. `state_init` must log the cause server-side and never render it to a browser.
+
 The concrete API should reuse shared `api-docs` page types instead of duplicating them when that dependency boundary is available.
+
+## HTTP semantics that must be pinned before implementation
+
+These are where AWS and GCP quietly disagree, so each needs a fixture, not prose.
+
+### Raw URI and percent-decoding
+
+- The adapter preserves `raw_path` and `raw_query` byte-for-byte. API Gateway v2 supplies both `rawPath` and a decoded `path`; only `rawPath`/`rawQueryString` are used. Function URLs and GCP are normalized to the same raw form.
+- Matching splits `raw_path` on `/` **first**, then percent-decodes each segment exactly once. `%2F` inside a segment is data, never a separator, so `/users/a%2Fb` matches `[id]` with `id = "a/b"` and can never reach a different page.
+- Reject before the page: invalid percent escapes, decoded segments that are not UTF-8, decoded `.`/`..` segments and NUL. Decoding happens exactly once: a `%25` decodes to a literal `%` that stays data, and nothing downstream decodes again.
+- A catch-all param is the decoded segments re-joined with `/`; the fixture set is shared with the standalone Axum projection so both hosts yield identical params.
+- `PageContext.request_path` receives the raw path, matching what the standalone router passes from `OriginalUri`.
+
+### Bodies
+
+AWS delivers `isBase64Encoded` + `body`. The adapter enforces the byte limit on the **decoded** length, bounds the encoded length first (4/3 + padding) so an oversized payload is rejected without allocating, and rejects invalid base64 with 400 before the page. GET/HEAD with a body is rejected. Response bodies are base64-encoded on AWS whenever the content type is not known text, and the flag is set by the adapter, never by a page.
+
+### Duplicate headers
+
+`ClientHeaders` is multi-valued and order-preserving per name. API Gateway v2 pre-joins duplicates with `,`; that is kept as one value and never split, because splitting is wrong for any header whose values may legally contain commas. Anything used for a security decision requires exactly one value: more than one `host`, `authorization`, `content-length` or session cookie name rejects the request.
+
+### Cookies
+
+- Request: API Gateway v2 moves cookies out of `headers` into a `cookies` array; Function URLs and GCP send a `cookie` header. The adapter normalizes both into one parsed cookie list and removes `cookie` from `ClientHeaders`, so middleware has a single source.
+- Response: `Set-Cookie` is never comma-joined. `PageHttpResponse.set_cookies` maps to the `cookies` array on AWS payload v2 and to repeated `Set-Cookie` headers on GCP. A fixture with two cookies, one containing an `Expires=Wed, 21 Oct ...` comma, must round-trip on both.
+
+### HEAD parity
+
+HEAD runs the same matcher, middleware and page as GET, then drops the body. Status and every header are identical to GET's, including `content-length` of the body GET would have sent and the same cache/auth headers. A page cannot observe whether it was HEAD. The fixture asserts header-for-header equality between GET and HEAD for every route shape.
+
+### Provenance is a type, not a header
+
+`IngressProvenance` has no public constructor and no `From<&ClientHeaders>`; only `aws::` and `gcp::` adapters can build it, from the provider event context (API Gateway `requestContext`, Function URL IAM context, GCP-validated metadata). `ClientHeaders` has no accessor that returns identity. Client-supplied `x-forwarded-*`, `forwarded`, `x-amzn-*`, `x-cloud-trace-context` and `x-goog-*` stay in `ClientHeaders` as untrusted strings, and middleware that needs client IP, scheme or caller identity can only take them from `IngressProvenance`. Forging provider identity from a request header is therefore a compile error in middleware, not a runtime check someone has to remember.
 
 ## Middleware order
 
@@ -166,7 +219,7 @@ Conceptually generated `main` calls:
 ```rust
 #[tokio::main]
 async fn main() -> Result<(), RuntimeError> {
-    let state = ores_web_app::ores_page_lambda_state().await.map_err(RuntimeError::state_init)?;
+    let state = __ORES_PAGE_STATE().await.map_err(RuntimeError::state_init)?;
     ores_page_lambda_runtime::aws::run_page(state, __ores_handle_page).await
 }
 ```
@@ -182,7 +235,7 @@ Conceptually:
 ```rust
 #[tokio::main]
 async fn main() -> Result<(), RuntimeError> {
-    let state = ores_web_app::ores_page_lambda_state().await.map_err(RuntimeError::state_init)?;
+    let state = __ORES_PAGE_STATE().await.map_err(RuntimeError::state_init)?;
     ores_page_lambda_runtime::gcp::run_page(state, __ores_handle_page).await
 }
 ```
