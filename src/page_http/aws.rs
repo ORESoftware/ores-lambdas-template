@@ -8,7 +8,7 @@ use ores_api_docs_client::PageState;
 use serde_json::{json, Map, Value};
 use std::{collections::BTreeMap, future::Future};
 
-const MAX_BASE64_BODY_BYTES: usize = ((MAX_PAGE_BODY_BYTES + 2) / 3) * 4;
+const MAX_BASE64_BODY_BYTES: usize = MAX_PAGE_BODY_BYTES.div_ceil(3) * 4;
 const MAX_COOKIE_COUNT: usize = 64;
 const MAX_COOKIE_BYTES: usize = 4096;
 
