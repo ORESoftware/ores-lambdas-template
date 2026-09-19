@@ -85,13 +85,15 @@ fn parse_cookie_headers(values: Option<Vec<String>>) -> Result<Vec<String>, Resp
     let mut cookies = Vec::new();
     for value in values {
         if value.len() > MAX_COOKIE_BYTES
-            || value
-                .bytes()
-                .any(|byte| matches!(byte, b'\r' | b'\n' | 0))
+            || value.bytes().any(|byte| matches!(byte, b'\r' | b'\n' | 0))
         {
             return Err(text_response(400, "invalid request cookies"));
         }
-        for cookie in value.split(';').map(str::trim).filter(|value| !value.is_empty()) {
+        for cookie in value
+            .split(';')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
             cookies.push(cookie.to_owned());
             if cookies.len() > MAX_COOKIE_COUNT {
                 return Err(text_response(400, "too many request cookies"));
