@@ -14,12 +14,12 @@ pub use runtime::{
     dispatch, Invocation, Operation, Provider, Receipt, MAX_INVOCATION_BYTES, SCHEMA_VERSION,
 };
 
-#[cfg(feature = "page")]
-pub use page_http::{
-    invoke_page, IngressProvenance, PageHttpMethod, PageHttpRequest, PageHttpResponse, RuntimeError,
-    MAX_PAGE_BODY_BYTES,
-};
 #[cfg(feature = "page-aws")]
 pub use page_http::aws;
 #[cfg(feature = "page-gcp")]
 pub use page_http::gcp;
+#[cfg(feature = "page")]
+pub use page_http::{
+    invoke_page, IngressProvenance, PageHttpMethod, PageHttpRequest, PageHttpResponse,
+    RuntimeError, MAX_PAGE_BODY_BYTES,
+};
