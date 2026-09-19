@@ -116,9 +116,7 @@ fn parse_cookies(value: Option<&Value>) -> Result<Vec<String>, PageHttpResponse>
             return Err(PageHttpResponse::text(400, "invalid request cookies"));
         };
         if cookie.len() > MAX_COOKIE_BYTES
-            || cookie
-                .bytes()
-                .any(|byte| matches!(byte, b'\r' | b'\n' | 0))
+            || cookie.bytes().any(|byte| matches!(byte, b'\r' | b'\n' | 0))
         {
             return Err(PageHttpResponse::text(400, "invalid request cookies"));
         }
