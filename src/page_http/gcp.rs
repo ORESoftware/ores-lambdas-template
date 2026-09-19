@@ -11,8 +11,14 @@ use axum::{
 use ores_api_docs_client::PageState;
 use std::{collections::BTreeMap, future::Future};
 
+const MAX_HEADER_COUNT: usize = 128;
+const MAX_HEADER_BYTES: usize = 64 * 1024;
+const MAX_HEADER_VALUE_BYTES: usize = 16 * 1024;
 const MAX_COOKIE_COUNT: usize = 64;
 const MAX_COOKIE_BYTES: usize = 4096;
+const MAX_COOKIE_TOTAL_BYTES: usize = 32 * 1024;
+const MAX_RAW_PATH_BYTES: usize = 8192;
+const MAX_RAW_QUERY_BYTES: usize = 16 * 1024;
 
 pub async fn run_page<H, Fut>(state: PageState, handler: H) -> Result<(), RuntimeError>
 where
@@ -49,11 +55,34 @@ async fn from_request(request: Request<Body>) -> Result<PageHttpRequest, Respons
         "HEAD" => PageHttpMethod::Head,
         _ => PageHttpMethod::Unsupported,
     };
+    if parts.uri.path().len() > MAX_RAW_PATH_BYTES
+        || parts
+            .uri
+            .query()
+            .is_some_and(|query| query.len() > MAX_RAW_QUERY_BYTES)
+    {
+        return Err(text_response(414, "request target too long"));
+    }
+    if parts.headers.len() > MAX_HEADER_COUNT {
+        return Err(text_response(431, "request headers too large"));
+    }
+
+    let mut total_header_bytes = 0usize;
     let mut headers = BTreeMap::new();
     for (name, value) in &parts.headers {
         let Ok(value) = value.to_str() else {
             return Err(text_response(400, "invalid request headers"));
         };
+        if value.len() > MAX_HEADER_VALUE_BYTES {
+            return Err(text_response(431, "request headers too large"));
+        }
+        total_header_bytes = total_header_bytes
+            .checked_add(name.as_str().len())
+            .and_then(|total| total.checked_add(value.len()))
+            .ok_or_else(|| text_response(431, "request headers too large"))?;
+        if total_header_bytes > MAX_HEADER_BYTES {
+            return Err(text_response(431, "request headers too large"));
+        }
         if normalize_header(&mut headers, name.as_str(), value).is_err() {
             return Err(text_response(400, "invalid request headers"));
         }
@@ -98,9 +127,14 @@ fn parse_cookie_headers(values: Option<Vec<String>>) -> Result<Vec<String>, Cook
     let Some(values) = values else {
         return Ok(Vec::new());
     };
+    let mut total_cookie_bytes = 0usize;
     let mut cookies = Vec::new();
     for value in values {
+        total_cookie_bytes = total_cookie_bytes
+            .checked_add(value.len())
+            .ok_or(CookieHeaderError::Invalid)?;
         if value.len() > MAX_COOKIE_BYTES
+            || total_cookie_bytes > MAX_COOKIE_TOTAL_BYTES
             || value.bytes().any(|byte| matches!(byte, b'\r' | b'\n' | 0))
         {
             return Err(CookieHeaderError::Invalid);
@@ -206,6 +240,31 @@ mod tests {
         assert_eq!(normalized.cookies, vec!["a=1", "b=2"]);
     }
 
+    #[tokio::test]
+    async fn oversized_request_metadata_fails_before_page_handler() {
+        let large_header = Request::builder()
+            .method(Method::GET)
+            .uri("/")
+            .header("x-large", "x".repeat(MAX_HEADER_VALUE_BYTES + 1))
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(from_request(large_header).await.unwrap_err().status(), 431);
+
+        let long_path = Request::builder()
+            .method(Method::GET)
+            .uri(format!("/{}", "x".repeat(MAX_RAW_PATH_BYTES)))
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(from_request(long_path).await.unwrap_err().status(), 414);
+
+        let long_query = Request::builder()
+            .method(Method::GET)
+            .uri(format!("/?q={}", "x".repeat(MAX_RAW_QUERY_BYTES + 1)))
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(from_request(long_query).await.unwrap_err().status(), 414);
+    }
+
     #[test]
     fn cookie_parser_returns_small_typed_errors() {
         assert_eq!(
@@ -215,6 +274,10 @@ mod tests {
         assert_eq!(
             parse_cookie_headers(Some(vec!["x=1;".repeat(MAX_COOKIE_COUNT + 1)])),
             Err(CookieHeaderError::TooMany)
+        );
+        assert_eq!(
+            parse_cookie_headers(Some(vec!["x".repeat(MAX_COOKIE_TOTAL_BYTES + 1)])),
+            Err(CookieHeaderError::Invalid)
         );
     }
 
