@@ -8,18 +8,19 @@ on:
       - .github/workflows/aws-middleware-lock-candidate.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   generate-lock:
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - name: Check out exact reviewed head
+      - name: Check out same-repository PR branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.ref }}
+          persist-credentials: true
           show-progress: false
 
       - name: Install declared Rust toolchain
@@ -35,6 +36,20 @@ jobs:
           grep -F 'rev=9d81ca1e75817d2c5d76f0bc59619b4e0c3e5fd9' Cargo.lock
           cargo metadata --locked --all-features --format-version 1 >/dev/null
           git diff --check -- Cargo.lock
+
+      - name: Commit generated lock when it changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- Cargo.lock; then
+            echo 'Cargo.lock already matches the reviewed dependency graph'
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -- Cargo.lock
+          git commit -m 'chore: refresh middleware Cargo lock'
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
 
       - name: Retain generated lock candidate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
