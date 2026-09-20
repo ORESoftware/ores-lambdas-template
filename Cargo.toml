@@ -19,6 +19,7 @@ vercel = ["dep:vercel_runtime", "dep:tokio"]
 portable = []
 # Browser-page hosting is intentionally separate from the command-envelope runtime.
 page = ["dep:ores-api-docs-client"]
+page-local = ["page"]
 page-aws = ["page", "dep:base64", "dep:lambda_runtime", "dep:tokio"]
 page-gcp = ["page", "dep:axum", "dep:tokio"]
 
