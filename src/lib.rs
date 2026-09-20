@@ -111,8 +111,8 @@ fn admission_rejection_response(
 mod page_invoke_tests {
     use super::*;
     use ores_api_docs_client::{
-        FinalizedPageResponse, PageAdmissionFuture, PageAdmissionInput, PageAdmissionRejection,
-        PageContext, PageState,
+        admit_public_page, FinalizedPageResponse, PageAdmissionFuture, PageAdmissionInput,
+        PageAdmissionRejection, PageContext, PageState,
     };
     use std::{
         collections::BTreeMap,
@@ -209,6 +209,62 @@ mod page_invoke_tests {
         assert_eq!(response.status, 200);
         assert_eq!(response.body, b"rendered");
         assert_eq!(PAGE_RUNS.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn public_page_uses_builtin_admission_and_runs_once() {
+        PAGE_RUNS.store(0, Ordering::SeqCst);
+        let response = invoke_page(
+            request(PageHttpMethod::Get),
+            PageState::default(),
+            "public",
+            &["/private/{id}"],
+            admit_public_page,
+            |context, _wasm_have| async move {
+                PAGE_RUNS.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(
+                    context.route_params.get("id").map(String::as_str),
+                    Some("42")
+                );
+                FinalizedPageResponse {
+                    status: 200,
+                    headers: Vec::new(),
+                    body: b"public-rendered".to_vec(),
+                }
+            },
+        )
+        .await
+        .expect("runtime response");
+
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, b"public-rendered");
+        assert_eq!(PAGE_RUNS.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn builtin_public_admission_cannot_downgrade_session_page() {
+        PAGE_RUNS.store(0, Ordering::SeqCst);
+        let response = invoke_page(
+            request(PageHttpMethod::Get),
+            PageState::default(),
+            "session",
+            &["/private/{id}"],
+            admit_public_page,
+            |_context, _wasm_have| async {
+                PAGE_RUNS.fetch_add(1, Ordering::SeqCst);
+                FinalizedPageResponse {
+                    status: 200,
+                    headers: Vec::new(),
+                    body: b"should-not-render".to_vec(),
+                }
+            },
+        )
+        .await
+        .expect("runtime response");
+
+        assert_eq!(response.status, 500);
+        assert_eq!(response.body, b"page authentication middleware is not configured");
+        assert_eq!(PAGE_RUNS.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
