@@ -13,6 +13,7 @@ url = "https://github.com/__ORG__/__PREFIX__-lambdas"
 [dependencies]
 "flags-2-env/flags-2-env" = "^0.3.0"
 "oresoftware/next-loggers" = "^0.1.0"
+"oresoftware/ores-middleware" = "^0.1.0"
 
 [install]
 dir = ".vendor/.zed"
