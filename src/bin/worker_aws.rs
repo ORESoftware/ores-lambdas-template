@@ -26,7 +26,10 @@ async fn main() -> Result<(), Error> {
         async move {
             let metadata = trusted_invocation_metadata(&event, "worker");
             let outcome = boundary
-                .run(metadata, async move { Ok::<_, Infallible>(from_event(event)) })
+                .run(
+                    metadata,
+                    async move { Ok::<_, Infallible>(from_event(event)) },
+                )
                 .await
                 .map_err(|error| -> Error { Box::new(error) })?;
             Ok::<_, Error>(serde_json::to_value(require_completed(outcome)?)?)
