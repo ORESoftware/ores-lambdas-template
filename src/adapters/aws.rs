@@ -2,7 +2,14 @@
 //! Completion builds a fresh envelope rather than mutating or aliasing caller-owned payload state.
 use crate::runtime::{handle_bound, Provider, Receipt};
 use lambda_runtime::LambdaEvent;
+use ores_middleware::{
+    LambdaInvocationBoundary, LambdaInvocationError, LambdaInvocationMetadata,
+    LambdaInvocationTrigger,
+};
 use serde_json::{Map, Value};
+
+pub const MIDDLEWARE_STACK_CONFIG: &str = "config/ores-middleware.stack.json";
+pub const MIDDLEWARE_TARGET: &str = "portable-adapters";
 
 fn complete_envelope(payload: &Value, request_id: &str) -> Value {
     let Value::Object(map) = payload else {
@@ -18,6 +25,39 @@ fn complete_envelope(payload: &Value, request_id: &str) -> Value {
                 ("requestId".to_owned(), Value::String(request_id.to_owned())),
             ]),
     ))
+}
+
+/// Build the process-wide callback boundary before the AWS runtime begins
+/// polling invocations. Missing/malformed repository policy therefore fails
+/// cold start instead of allowing an unguarded callback.
+pub fn invocation_boundary() -> Result<LambdaInvocationBoundary, LambdaInvocationError> {
+    LambdaInvocationBoundary::from_env(
+        "__PREFIX__-lambdas",
+        Some(MIDDLEWARE_TARGET),
+        MIDDLEWARE_STACK_CONFIG,
+    )
+}
+
+/// Derive callback metadata only from the trusted Lambda runtime context and
+/// the already-decoded payload size. AWS X-Ray trace IDs are intentionally not
+/// projected into the W3C 32-hex trace-id slot; the middleware boundary creates
+/// a standards-shaped trace ID when no trusted W3C value exists.
+pub fn trusted_invocation_metadata(
+    event: &LambdaEvent<Value>,
+    function_name: &str,
+) -> LambdaInvocationMetadata {
+    let payload_bytes = serde_json::to_vec(&event.payload)
+        .ok()
+        .and_then(|bytes| u64::try_from(bytes.len()).ok())
+        .unwrap_or(u64::MAX);
+    LambdaInvocationMetadata {
+        invocation_id: event.context.request_id.clone(),
+        trace_id: None,
+        function_name: function_name.to_owned(),
+        trigger: LambdaInvocationTrigger::Direct,
+        payload_bytes,
+        deadline_unix_ms: Some(event.context.deadline),
+    }
 }
 
 pub fn from_event(event: LambdaEvent<Value>) -> Receipt {
