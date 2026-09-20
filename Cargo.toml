@@ -33,9 +33,8 @@ vercel_runtime = { version = "1", optional = true }
 # Invocation middleware is required inside both HTTP and non-HTTP runtimes. Keep
 # the dependency provider-neutral; the HTTP feature opts into the Axum adapter,
 # while the AWS feature uses the callback-native Lambda boundary only.
-# This temporary exact pin is the reviewed head of ores-middleware#252; update to
-# the merged commit before promotion.
-ores-middleware = { git = "https://github.com/ORESoftware/ores-middleware.git", rev = "9d81ca1e75817d2c5d76f0bc59619b4e0c3e5fd9", package = "ores-middleware", default-features = false, optional = true }
+# Exact merged ores-middleware#252 callback-policy admission revision.
+ores-middleware = { git = "https://github.com/ORESoftware/ores-middleware.git", rev = "3373e139a03ffa27f7ecb0c97e5df38ee2de4617", package = "ores-middleware", default-features = false, optional = true }
 # Exact merged api-docs#195 page admission ABI. Provider hosts must call generated
 # lambda::admit before lambda::run for every non-public page invocation.
 ores-api-docs-client = { package = "ores-api-docs-client", git = "https://github.com/ORESoftware/api-docs.git", rev = "f58db5a020339879b6aa0b5404c59b4bd9cb2357", optional = true }
