@@ -20,6 +20,6 @@ pub use page_http::aws;
 pub use page_http::gcp;
 #[cfg(feature = "page")]
 pub use page_http::{
-    invoke_page, IngressProvenance, PageHttpMethod, PageHttpRequest, PageHttpResponse,
-    RuntimeError, MAX_PAGE_BODY_BYTES,
+    admit_page_request, finish_page_response, IngressProvenance, PageHttpMethod, PageHttpRequest,
+    PageHttpResponse, PageInvocation, RuntimeError, MAX_PAGE_BODY_BYTES,
 };
