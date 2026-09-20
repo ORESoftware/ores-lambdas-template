@@ -1,0 +1,83 @@
+name: fleet manifest conformance
+
+on:
+  pull_request:
+    paths:
+      - '.ores-lambda.toml'
+      - '.ores-mw.toml'
+      - '.zpkg.toml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'contracts/**'
+      - 'conformance/**'
+      - 'src/**'
+      - '.github/workflows/fleet-manifest-conformance.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.ores-lambda.toml'
+      - '.ores-mw.toml'
+      - '.zpkg.toml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'contracts/**'
+      - 'conformance/**'
+      - 'src/**'
+      - '.github/workflows/fleet-manifest-conformance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ORES_LAMBDA_REVISION: d3b97143dd1558635da46e0a647ad603968ab9ec
+  EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  repository-admission:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact reviewed Lambda repository head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.EXPECTED_SHA }}
+          persist-credentials: false
+          show-progress: false
+
+      - name: Verify exact reviewed source
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "${EXPECTED_SHA}"
+
+      - name: Check out exact ores-lambda conformance authority
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ORESoftware/ores-lambda
+          ref: ${{ env.ORES_LAMBDA_REVISION }}
+          path: target/tools/ores-lambda
+          persist-credentials: false
+          show-progress: false
+
+      - name: Verify conformance authority revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C target/tools/ores-lambda rev-parse HEAD)" = "${ORES_LAMBDA_REVISION}"
+
+      - name: Install shared Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: '1.88'
+
+      - name: Admit fleet manifest and repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo run --locked \
+            --manifest-path target/tools/ores-lambda/Cargo.toml \
+            -p ores-lambda-conformance --bin ores-lambda -- \
+            check .ores-lambda.toml
+          cargo run --locked \
+            --manifest-path target/tools/ores-lambda/Cargo.toml \
+            -p ores-lambda-conformance --bin ores-lambda -- \
+            check-repo .
