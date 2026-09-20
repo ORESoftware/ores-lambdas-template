@@ -311,10 +311,7 @@ fn validate_pattern(pattern: &str) -> Result<(), PathMatchError> {
             .strip_prefix("{*")
             .and_then(|value| value.strip_suffix('}'))
         {
-            if name.is_empty()
-                || index + 1 != parts.len()
-                || captures.insert(name, ()).is_some()
-            {
+            if name.is_empty() || index + 1 != parts.len() || captures.insert(name, ()).is_some() {
                 return Err(PathMatchError::InvalidPattern);
             }
             continue;
@@ -323,10 +320,7 @@ fn validate_pattern(pattern: &str) -> Result<(), PathMatchError> {
             .strip_prefix('{')
             .and_then(|value| value.strip_suffix('}'))
         {
-            if name.is_empty()
-                || name.starts_with('*')
-                || captures.insert(name, ()).is_some()
-            {
+            if name.is_empty() || name.starts_with('*') || captures.insert(name, ()).is_some() {
                 return Err(PathMatchError::InvalidPattern);
             }
             continue;
@@ -390,10 +384,7 @@ fn hex(value: u8) -> Option<u8> {
     }
 }
 
-fn match_validated_pattern(
-    request: &[String],
-    pattern: &str,
-) -> Option<BTreeMap<String, String>> {
+fn match_validated_pattern(request: &[String], pattern: &str) -> Option<BTreeMap<String, String>> {
     let parts = if pattern == "/" {
         Vec::new()
     } else {
