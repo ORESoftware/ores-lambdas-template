@@ -278,13 +278,64 @@ fn match_any_path(
     raw_path: &str,
     patterns: &[&str],
 ) -> Result<Option<BTreeMap<String, String>>, PathMatchError> {
+    // Validate generated authority before looking at the request. A malformed
+    // generated route is a server/build fault regardless of whether this
+    // particular request is short, malformed, or would otherwise be a miss.
+    for pattern in patterns {
+        validate_pattern(pattern)?;
+    }
     let request = decode_path_segments(raw_path)?;
     for pattern in patterns {
-        if let Some(params) = match_pattern(&request, pattern)? {
+        if let Some(params) = match_validated_pattern(&request, pattern) {
             return Ok(Some(params));
         }
     }
     Ok(None)
+}
+
+fn validate_pattern(pattern: &str) -> Result<(), PathMatchError> {
+    if !pattern.starts_with('/') || pattern.contains('?') || pattern.contains('#') {
+        return Err(PathMatchError::InvalidPattern);
+    }
+    let parts = if pattern == "/" {
+        Vec::new()
+    } else {
+        pattern[1..].split('/').collect::<Vec<_>>()
+    };
+    let mut captures = BTreeMap::<&str, ()>::new();
+    for (index, part) in parts.iter().enumerate() {
+        if part.is_empty() {
+            return Err(PathMatchError::InvalidPattern);
+        }
+        if let Some(name) = part
+            .strip_prefix("{*")
+            .and_then(|value| value.strip_suffix('}'))
+        {
+            if name.is_empty()
+                || index + 1 != parts.len()
+                || captures.insert(name, ()).is_some()
+            {
+                return Err(PathMatchError::InvalidPattern);
+            }
+            continue;
+        }
+        if let Some(name) = part
+            .strip_prefix('{')
+            .and_then(|value| value.strip_suffix('}'))
+        {
+            if name.is_empty()
+                || name.starts_with('*')
+                || captures.insert(name, ()).is_some()
+            {
+                return Err(PathMatchError::InvalidPattern);
+            }
+            continue;
+        }
+        if part.contains('{') || part.contains('}') {
+            return Err(PathMatchError::InvalidPattern);
+        }
+    }
+    Ok(())
 }
 
 fn decode_path_segments(raw_path: &str) -> Result<Vec<String>, PathMatchError> {
@@ -339,13 +390,10 @@ fn hex(value: u8) -> Option<u8> {
     }
 }
 
-fn match_pattern(
+fn match_validated_pattern(
     request: &[String],
     pattern: &str,
-) -> Result<Option<BTreeMap<String, String>>, PathMatchError> {
-    if !pattern.starts_with('/') || pattern.contains('?') || pattern.contains('#') {
-        return Err(PathMatchError::InvalidPattern);
-    }
+) -> Option<BTreeMap<String, String>> {
     let parts = if pattern == "/" {
         Vec::new()
     } else {
@@ -353,49 +401,30 @@ fn match_pattern(
     };
     let mut params = BTreeMap::new();
     let mut request_index = 0;
-    for (index, part) in parts.iter().enumerate() {
-        if part.is_empty() {
-            return Err(PathMatchError::InvalidPattern);
-        }
+    for part in parts {
         if let Some(name) = part
             .strip_prefix("{*")
             .and_then(|value| value.strip_suffix('}'))
         {
-            if name.is_empty() || index + 1 != parts.len() {
-                return Err(PathMatchError::InvalidPattern);
-            }
             if request_index >= request.len() {
-                return Ok(None);
+                return None;
             }
             params.insert(name.to_owned(), request[request_index..].join("/"));
             request_index = request.len();
             break;
         }
-        let Some(actual) = request.get(request_index) else {
-            return Ok(None);
-        };
+        let actual = request.get(request_index)?;
         if let Some(name) = part
             .strip_prefix('{')
             .and_then(|value| value.strip_suffix('}'))
         {
-            if name.is_empty() || name.starts_with('*') {
-                return Err(PathMatchError::InvalidPattern);
-            }
-            if params.insert(name.to_owned(), actual.clone()).is_some() {
-                return Err(PathMatchError::InvalidPattern);
-            }
-        } else if part.contains('{') || part.contains('}') {
-            return Err(PathMatchError::InvalidPattern);
-        } else if *part != actual {
-            return Ok(None);
+            params.insert(name.to_owned(), actual.clone());
+        } else if part != actual {
+            return None;
         }
         request_index += 1;
     }
-    if request_index == request.len() {
-        Ok(Some(params))
-    } else {
-        Ok(None)
-    }
+    (request_index == request.len()).then_some(params)
 }
 
 #[cfg(feature = "page-aws")]
@@ -448,14 +477,29 @@ mod tests {
 
     #[test]
     fn malformed_generated_pattern_is_server_failure_not_client_blame() {
-        let response = admit_page_request(
-            request(PageHttpMethod::Get, "/users/42"),
-            PageState::default(),
-            &["/users/{id}/{id}"],
-        )
-        .unwrap_err();
-        assert_eq!(response.status, 500);
-        assert_eq!(response.body, b"page host failed");
+        for request_path in ["/users/42", "/users/42/43", "/users/%"] {
+            let response = admit_page_request(
+                request(PageHttpMethod::Get, request_path),
+                PageState::default(),
+                &["/users/{id}/{id}"],
+            )
+            .unwrap_err();
+            assert_eq!(response.status, 500, "{request_path}");
+            assert_eq!(response.body, b"page host failed");
+        }
+    }
+
+    #[test]
+    fn malformed_catch_all_pattern_is_server_failure() {
+        for pattern in ["/docs/{*}", "/docs/{*slug}/tail", "/docs/{slug}/{*slug}"] {
+            let response = admit_page_request(
+                request(PageHttpMethod::Get, "/docs/a/b"),
+                PageState::default(),
+                &[pattern],
+            )
+            .unwrap_err();
+            assert_eq!(response.status, 500, "{pattern}");
+        }
     }
 
     #[test]
