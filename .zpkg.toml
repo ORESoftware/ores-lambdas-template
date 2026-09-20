@@ -36,9 +36,10 @@ adapter = "none"
 [build]
 command = "cargo build --locked --release --features http,portable"
 
+# Released Zed currently exposes package-level `test` here; other lifecycle
+# admission is implemented by tracked `.zpkg/hooks/*` in the generated repo.
 [scripts]
 test = "sh conformance/check.sh"
-conformance = "sh conformance/check.sh"
 
 [publish]
 include_readme = true
