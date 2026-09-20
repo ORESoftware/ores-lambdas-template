@@ -198,10 +198,7 @@ pub fn admit_page_request(
 /// provider-neutral HTTP shape. Provider adapters perform only the final cloud
 /// envelope conversion after this step.
 #[must_use]
-pub fn finish_page_response(
-    finalized: FinalizedPageResponse,
-    head: bool,
-) -> PageHttpResponse {
+pub fn finish_page_response(finalized: FinalizedPageResponse, head: bool) -> PageHttpResponse {
     let mut headers = Vec::with_capacity(finalized.headers.len());
     let mut set_cookies = Vec::new();
     for (name, value) in finalized.headers {
@@ -431,8 +428,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            invocation.context.route_params["id"],
-            "a/b%2Fc",
+            invocation.context.route_params["id"], "a/b%2Fc",
             "encoded slash is page-param data and percent decoding occurs exactly once"
         );
     }
@@ -504,8 +500,7 @@ mod tests {
             "x-ores-wasm-have".to_owned(),
             vec!["sha256-fixture".to_owned()],
         );
-        let invocation =
-            admit_page_request(req, PageState::default(), &["/users/{id}"]).unwrap();
+        let invocation = admit_page_request(req, PageState::default(), &["/users/{id}"]).unwrap();
         assert_eq!(invocation.hints().wasm_have, Some("sha256-fixture"));
         assert_eq!(invocation.hints().dev_reload_script, None);
     }
@@ -515,8 +510,7 @@ mod tests {
         let mut req = request(PageHttpMethod::Get, "/users/42");
         req.headers
             .insert("authorization".to_owned(), vec!["a,b".to_owned()]);
-        let response = admit_page_request(req, PageState::default(), &["/users/{id}"])
-            .unwrap_err();
+        let response = admit_page_request(req, PageState::default(), &["/users/{id}"]).unwrap_err();
         assert_eq!(response.status, 400);
     }
 
