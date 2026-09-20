@@ -2,7 +2,10 @@
 //! flags-2-env owns the argv boundary (.cli-flags.toml); PORT and FUNCTIONS_CUSTOMHANDLER_PORT are
 //! the platforms' contracts and are honoured through that contract, not read ad hoc.
 use flags2env::BundledFlags2Env;
-use std::{collections::HashMap, net::{IpAddr, SocketAddr}};
+use std::{
+    collections::HashMap,
+    net::{IpAddr, SocketAddr},
+};
 use __CRATE__::adapters::http::{detect_provider, router, HttpConfig};
 
 const CONTRACT: &str = ".cli-flags.toml";
