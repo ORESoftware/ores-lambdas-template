@@ -21,11 +21,12 @@ max_request_body_bytes = 1048576
 max_response_body_bytes = 8388608
 max_attempts = 2
 
-# The template starts with one provider-neutral worker. Generated repositories
-# add one entry per imported API/web lambda and per custom lambda they own.
+# One manifest entry describes one deployed invocation surface. The same custom
+# runtime source can legitimately feed both an HTTP listener and a direct cloud
+# callback, but their trigger and middleware semantics remain explicit.
 [[functions]]
 id = "worker"
-entrypoint = "worker"
+entrypoint = "worker-http"
 trigger = "http"
 middleware_required = true
 
@@ -48,3 +49,25 @@ methods = ["POST"]
 hosts = []
 priority = 100
 preserve_host = false
+
+[[functions]]
+id = "worker-aws"
+entrypoint = "worker-aws"
+trigger = "direct"
+middleware_required = true
+
+[functions.source]
+kind = "custom"
+repository = "__PREFIX__-lambdas"
+path = "src/runtime.rs"
+
+[[functions]]
+id = "health-aws"
+entrypoint = "health"
+trigger = "direct"
+middleware_required = true
+
+[functions.source]
+kind = "custom"
+repository = "__PREFIX__-lambdas"
+path = "src/bin/health.rs"
