@@ -1,0 +1,50 @@
+schema_version = "ores.lambda.manifest/v1"
+
+[repository]
+organization = "__ORG__"
+repository = "__PREFIX__-lambdas"
+
+# ores-middleware is an invocation-boundary requirement, not merely an ingress layer.
+# Generated repositories must materialize .ores-mw.toml before promotion.
+[middleware]
+required = true
+package = "oresoftware/ores-middleware"
+config_path = ".ores-mw.toml"
+execution = "invocation"
+fail_closed = true
+
+[local_ingress]
+enabled = true
+bind = "127.0.0.1:8088"
+request_timeout_ms = 10000
+max_request_body_bytes = 1048576
+max_response_body_bytes = 8388608
+max_attempts = 2
+
+# The template starts with one provider-neutral worker. Generated repositories
+# add one entry per imported API/web lambda and per custom lambda they own.
+[[functions]]
+id = "worker"
+entrypoint = "worker"
+trigger = "http"
+middleware_required = true
+
+[functions.source]
+kind = "custom"
+repository = "__PREFIX__-lambdas"
+path = "src/runtime.rs"
+
+[functions.local]
+working_dir = "__PREFIX__-lambdas"
+command = ["cargo", "run", "--locked", "--features", "http", "--bin", "worker-http"]
+bind_env = "LAMBDAS_BIND"
+host = "127.0.0.1"
+start_port = 19200
+replicas = 2
+
+[functions.http]
+ingress_path_prefix = "/__ores/lambda/worker"
+methods = ["POST"]
+hosts = []
+priority = 100
+preserve_host = false
