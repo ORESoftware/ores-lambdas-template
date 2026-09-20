@@ -263,7 +263,10 @@ mod page_invoke_tests {
         .expect("runtime response");
 
         assert_eq!(response.status, 500);
-        assert_eq!(response.body, b"page authentication middleware is not configured");
+        assert_eq!(
+            response.body,
+            b"page authentication middleware is not configured"
+        );
         assert_eq!(PAGE_RUNS.load(Ordering::SeqCst), 0);
     }
 
