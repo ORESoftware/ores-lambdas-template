@@ -2,13 +2,17 @@
 //! flags-2-env owns the argv boundary (.cli-flags.toml); PORT and FUNCTIONS_CUSTOMHANDLER_PORT are
 //! the platforms' contracts and are honoured through that contract, not read ad hoc.
 use flags2env::BundledFlags2Env;
+use ores_middleware::{admit_server_stack_from_env, frameworks::axum::install_from_env};
 use std::{
     collections::HashMap,
+    fs,
     net::{IpAddr, SocketAddr},
 };
 use __CRATE__::adapters::http::{detect_provider, router, HttpConfig};
 
 const CONTRACT: &str = ".cli-flags.toml";
+const MIDDLEWARE_STACK_CONFIG: &str = "config/ores-middleware.stack.json";
+const MIDDLEWARE_TARGET: &str = "portable-adapters";
 
 #[derive(Debug, serde::Deserialize)]
 struct Config {
@@ -18,6 +22,23 @@ struct Config {
     functions_customhandler_port: Option<u16>,
     #[serde(rename = "LAMBDAS_BIND")]
     bind: String,
+}
+
+fn admit_middleware_boundary() -> Result<(), Box<dyn std::error::Error>> {
+    let manifest_path =
+        admit_server_stack_from_env(Some(MIDDLEWARE_TARGET), MIDDLEWARE_STACK_CONFIG)?;
+    let metadata = fs::symlink_metadata(MIDDLEWARE_STACK_CONFIG)?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(format!(
+            "middleware stack config must be a regular non-symlink file: {MIDDLEWARE_STACK_CONFIG}"
+        )
+        .into());
+    }
+    eprintln!(
+        "__PREFIX__-lambdas admitted middleware target {MIDDLEWARE_TARGET} from {}",
+        manifest_path.display()
+    );
+    Ok(())
 }
 
 #[tokio::main]
@@ -37,6 +58,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut values: HashMap<String, String> = std::env::vars().collect();
     values.extend(parsed.provided_flags);
     let config: Config = parser.coerce(&values, Some(CONTRACT))?;
+
+    // The Lambda fleet contract requires middleware at the invocation boundary.
+    // Admit the repository-owned .ores-mw.toml and its stack path before the
+    // listener is bound so malformed/missing policy fails closed.
+    admit_middleware_boundary()?;
+
     // Azure's custom-handler port takes precedence when present; Cloud Run sets PORT.
     let port = config
         .functions_customhandler_port
@@ -52,7 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Provider selection consumes the same final immutable environment map used for typed
     // flags2env coercion. Do not re-read ambient process state after CLI overrides are applied.
     let provider = detect_provider(|key| values.get(key).cloned());
-    let app = router(HttpConfig { provider });
+    let app = install_from_env(router(HttpConfig { provider }), "__PREFIX__-lambdas")?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
     eprintln!("__PREFIX__-lambdas worker-http listening on {addr} as {provider:?}");
     axum::serve(listener, app)
