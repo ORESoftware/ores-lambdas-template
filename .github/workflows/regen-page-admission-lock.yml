@@ -1,0 +1,53 @@
+name: Regenerate page admission lock
+
+on:
+  push:
+    branches:
+      - draft/web-page-lambda-runtime
+    paths:
+      - Cargo.toml
+      - .github/workflows/regen-page-admission-lock.yml
+
+permissions:
+  contents: write
+
+jobs:
+  regenerate-lock:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact PR branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: draft/web-page-lambda-runtime
+          persist-credentials: true
+          show-progress: false
+
+      - name: Install Rust 1.88.0
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.88.0
+          components: rustfmt,clippy
+
+      - name: Regenerate only the api-docs client lock entry with Cargo
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo update -p ores-api-docs-client --precise f58db5a020339879b6aa0b5404c59b4bd9cb2357
+          cargo fmt --all -- --check
+          cargo check --all-features --locked
+          git diff --check
+
+      - name: Commit Cargo-generated lockfile
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- Cargo.lock; then
+            echo "Cargo.lock already matches the merged admission ABI."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.lock
+          git commit -m "chore(page): regenerate lock for admission ABI"
+          git push origin HEAD:draft/web-page-lambda-runtime
