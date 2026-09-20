@@ -1,7 +1,5 @@
 # Conformance
 
-This directory is the repository-local conformance boundary.
+`conformance/check.sh` is the canonical repository-level lifecycle entry point for the generated Lambda template. It fail-closes on symlinked authority roots, requires the committed Cargo lock, checks Docker/OCI build-definition identity, executes the existing entrypoint/concern/lock/ores-cli audit contract suites, and runs the locked Rust adapter tests for `http`, `portable`, and `aws`.
 
-Put provider-neutral invocation fixtures, invalid cases, compatibility matrices, and executable checks here. Conformance evidence tests the contract; it must not become a second contract authority.
-
-Existing mature tests do not need to move solely for layout. New cross-provider and cross-runtime evidence should grow here and may call existing test harnesses.
+Independent TypeSpec and JSON Schema peer-authority validation remains owned by the existing TJSV workflow and `schema-authority/`; this directory does not replace or regenerate either authored authority.
