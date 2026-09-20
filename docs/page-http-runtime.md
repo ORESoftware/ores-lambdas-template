@@ -197,6 +197,7 @@ The rollout proof must show:
 - session-page admission executes before page code for AWS and GCP wrappers;
 - a rejected admission never executes page code;
 - the built-in public admission succeeds only for `auth = "public"` and fails closed for non-public auth;
+- admission ordering tests remain parallel-safe and do not share mutable counters across Rust test cases;
 - route params agree across static, dynamic and catch-all routes;
 - malformed paths/patterns fail before page execution;
 - untrusted headers cannot forge provenance;
