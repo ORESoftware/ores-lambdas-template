@@ -25,6 +25,8 @@ jobs:
   lock-contract:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    outputs:
+      candidate_valid: ${{ steps.audit.outputs.valid }}
     env:
       EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
     steps:
@@ -44,19 +46,19 @@ jobs:
         with:
           toolchain: '1.88'
 
-      - name: Generate candidate only when the repository has no lock
+      - name: Generate exact Cargo lock candidate
         shell: bash
         run: |
           set -euo pipefail
           if [ -f Cargo.lock ]; then
-            echo 'validating committed Cargo.lock'
-          else
-            echo 'Cargo.lock is absent; generating a reviewable candidate'
-            cargo generate-lockfile
+            cp Cargo.lock Cargo.lock.committed
           fi
+          cargo generate-lockfile
+          cp Cargo.lock Cargo.lock.candidate
           cargo metadata --locked --all-features --format-version 1 >/dev/null
 
       - name: Audit immutable source and checksum coverage
+        id: audit
         shell: bash
         run: |
           set -euo pipefail
@@ -65,10 +67,10 @@ jobs:
           import tomllib
           from pathlib import Path
 
-          lock = tomllib.loads(Path('Cargo.lock').read_text(encoding='utf-8'))
+          lock = tomllib.loads(Path('Cargo.lock.candidate').read_text(encoding='utf-8'))
           packages = lock.get('package', [])
           if not packages:
-              raise SystemExit('Cargo.lock contains no packages')
+              raise SystemExit('Cargo.lock candidate contains no packages')
 
           for package in packages:
               name = package.get('name', '<unknown>')
@@ -78,7 +80,7 @@ jobs:
               if source.startswith('git+'):
                   fragment = source.rsplit('#', 1)[-1]
                   if not re.fullmatch(r'[0-9a-f]{40}', fragment):
-                      raise SystemExit(f'git dependency is not immutable in Cargo.lock: {name}')
+                      raise SystemExit(f'git dependency is not immutable in Cargo.lock candidate: {name}')
               elif source.startswith('registry+'):
                   checksum = package.get('checksum')
                   if not isinstance(checksum, str) or not re.fullmatch(r'[0-9a-f]{64}', checksum):
@@ -86,17 +88,103 @@ jobs:
               else:
                   raise SystemExit(f'unapproved Cargo source scheme for {name}: {source}')
           PY
+          echo 'valid=true' >> "$GITHUB_OUTPUT"
 
-      - name: Record exact lock digest
+      - name: Record exact candidate digest
         shell: bash
-        run: sha256sum Cargo.lock > Cargo.lock.sha256
+        run: sha256sum Cargo.lock.candidate > Cargo.lock.candidate.sha256
 
-      - name: Retain exact lock candidate or committed-lock evidence
+      - name: Retain committed and candidate lock evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cargo-lock-${{ github.run_id }}
           path: |
-            Cargo.lock
-            Cargo.lock.sha256
+            Cargo.lock.candidate
+            Cargo.lock.candidate.sha256
+            Cargo.lock.committed
           if-no-files-found: error
           retention-days: 30
+
+      - name: Require committed lock to equal Cargo candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f Cargo.lock.committed ]; then
+            echo 'Cargo.lock is missing; use the uploaded Cargo.lock.candidate verbatim' >&2
+            exit 1
+          fi
+          if ! cmp -s Cargo.lock.committed Cargo.lock.candidate; then
+            echo 'Cargo.lock drift: use the uploaded Cargo.lock.candidate verbatim' >&2
+            diff -u Cargo.lock.committed Cargo.lock.candidate || true
+            exit 1
+          fi
+
+  # Temporary self-repair lane for this same-repository draft only. It keeps the
+  # candidate bytes entirely inside GitHub after the read-only job has generated,
+  # resolved and audited them. Remove this job once the repaired lock is green.
+  repair-draft-lock:
+    needs: lock-contract
+    if: >-
+      ${{
+        always() &&
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.head.ref == 'draft/web-page-lambda-runtime' &&
+        needs.lock-contract.outputs.candidate_valid == 'true' &&
+        needs.lock-contract.result == 'failure'
+      }}
+    permissions:
+      contents: write
+      actions: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+    steps:
+      - name: Check out exact draft head with push credential
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.EXPECTED_SHA }}
+          persist-credentials: true
+          show-progress: false
+          fetch-depth: 1
+
+      - name: Verify branch has not moved
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${EXPECTED_SHA}"
+          remote_sha="$(git ls-remote origin "refs/heads/${HEAD_REF}" | cut -f1)"
+          test "${remote_sha}" = "${EXPECTED_SHA}"
+
+      - name: Download audited candidate evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: cargo-lock-${{ github.run_id }}
+          path: lock-evidence
+
+      - name: Verify and install exact candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd lock-evidence
+          sha256sum --check Cargo.lock.candidate.sha256
+          test -s Cargo.lock.candidate
+          cd ..
+          cp lock-evidence/Cargo.lock.candidate Cargo.lock
+          cargo metadata --locked --all-features --format-version 1 >/dev/null
+
+      - name: Commit exact Cargo candidate to draft branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- Cargo.lock; then
+            echo 'Cargo.lock already matches audited candidate'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Cargo.lock
+          git commit -m 'refresh Cargo lock from audited CI candidate'
+          git push origin "HEAD:${HEAD_REF}"
