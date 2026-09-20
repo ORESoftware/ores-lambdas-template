@@ -2,7 +2,7 @@
 //! flags-2-env owns the argv boundary (.cli-flags.toml); PORT and FUNCTIONS_CUSTOMHANDLER_PORT are
 //! the platforms' contracts and are honoured through that contract, not read ad hoc.
 use flags2env::BundledFlags2Env;
-use std::collections::HashMap;
+use std::{collections::HashMap, net::{IpAddr, SocketAddr}};
 use __CRATE__::adapters::http::{detect_provider, router, HttpConfig};
 
 const CONTRACT: &str = ".cli-flags.toml";
@@ -39,12 +39,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .functions_customhandler_port
         .or(config.port)
         .unwrap_or(8080);
+    // ores-compose host_bind supplies one full socket value per replica. Cloud providers commonly
+    // supply host and port separately, so accept either representation without a second parser.
+    let addr = if let Ok(socket) = config.bind.parse::<SocketAddr>() {
+        socket
+    } else {
+        SocketAddr::new(config.bind.parse::<IpAddr>()?, port)
+    };
     // Provider selection consumes the same final immutable environment map used for typed
     // flags2env coercion. Do not re-read ambient process state after CLI overrides are applied.
     let provider = detect_provider(|key| values.get(key).cloned());
     let app = router(HttpConfig { provider });
-    let addr = format!("{}:{port}", config.bind);
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    let listener = tokio::net::TcpListener::bind(addr).await?;
     eprintln!("__PREFIX__-lambdas worker-http listening on {addr} as {provider:?}");
     axum::serve(listener, app)
         .with_graceful_shutdown(async {
