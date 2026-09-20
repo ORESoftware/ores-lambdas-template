@@ -2,270 +2,225 @@
 
 > Scope: provider hosting for generated `*-web-server.rs` / `*-admin-web-server.rs` page Lambdas. This is not the API/RPC operation-Lambda dispatcher.
 
-## Coordinated contract
+## Coordinated ownership
 
-This runtime is one part of the five-PR web-page Lambda set:
+The web-page Lambda stack is split deliberately:
 
 | PR | Owns |
 | --- | --- |
 | `api-docs#177` | page/API boundary and page manifest/docs direction |
-| `api-docs#176` | page invocation/state/finalization ABI and generated sibling `lambda.rs` |
-| `ores-stack#69` | repository-role admission, manifest/docs/deployment IR |
-| `ores-stack#68` | Lambda materialization/build/package |
-| `ores-lambdas-template#35` | provider lifecycle, request normalization and middleware |
+| `api-docs#176` | provider-neutral page module, page/state/finalization ABI |
+| `ores-stack#69` | repository admission, deterministic web projections and source sync/check |
+| `ores-stack#68` | provider-wrapper build/package orchestration |
+| `ores-lambdas-template#35` | provider HTTP lifecycle, bounded admission and provider envelopes |
 
-The route folder is:
+The server source tree is:
 
 ```text
 src/pages/x/y/z/
-  page.rs      # authored
+  page.rs      # authored routing/behavior authority
   gen.rs       # optional authored build-time enumeration
-  lambda.rs    # generated; never authored
+  lambda.rs    # generated provider-neutral module; no main()
 ```
 
-The runtime never turns a page into an RPC operation and never constructs the product's full API/RPC router.
+Provider-specific executables are generated outside server source, under an ignored build tree such as:
 
-## Cross-crate ABI
+```text
+*-lambdas/build/lambda/aws/funcs/web/<id>/main.rs
+*-lambdas/build/lambda/gcp/funcs/web/<id>/main.rs
+```
 
-`api-docs#176` now exports three typed surfaces from the web-server library for each generated page Lambda:
+The same deterministic wrapper template is used by conformance and deployment builds so test and production mains cannot drift.
+
+## Generated-module ABI
+
+`api-docs#176` binds the private authored page and its admitted finalizer inside generated sibling `lambda.rs` and exports only:
 
 ```rust
-const __ORES_PAGE: ::ores_api_docs_client::PageFn =
-    ::ores_web_app::ores_pages::__ores_invoke_page_<stem>_<digest>;
+pub async fn init_state() -> Result<
+    ores_api_docs_client::PageState,
+    ores_api_docs_client::PageLambdaStateError,
+>;
 
-const __ORES_PAGE_FINALIZE: ::ores_api_docs_client::PageFinalizeFn =
-    ::ores_web_app::ores_pages::__ores_finalize_page_<stem>_<digest>;
-
-const __ORES_PAGE_STATE: ::ores_api_docs_client::PageLambdaStateFn =
-    ::ores_web_app::ores_page_lambda_state;
+pub async fn run(
+    context: ores_api_docs_client::PageContext,
+    hints: ores_api_docs_client::PageResponseRequestHints<'_>,
+) -> ores_api_docs_client::FinalizedPageResponse;
 ```
 
-Page modules themselves remain private. The digest suffix prevents source-path normalization collisions.
+The provider runtime does **not** receive or invoke `PageFn` or `PageFinalizeFn`. Those remain bound inside the generated server module so standalone/conformance/provider hosts execute the same page and response-finalization authority.
 
-The per-page `PageFinalizeFn` closes over the **same admitted CSS/WASM/JS build metadata** used by standalone Axum. Provider runtimes therefore receive a finalizer function; they do not rediscover page assets or duplicate HTML mutation logic.
+## Provider-runtime API
 
-## Provider-neutral API
-
-Conceptually:
+This crate owns normalized provider HTTP shapes:
 
 ```rust
 pub struct PageHttpRequest {
-    pub method: HttpMethod,
+    pub method: PageHttpMethod,
     pub raw_path: String,
     pub raw_query: Option<String>,
-    pub headers: ClientHeaders,
-    pub cookies: ClientCookies,
+    pub headers: BTreeMap<String, Vec<String>>,
+    pub cookies: Vec<String>,
     pub body: Vec<u8>,
     pub provenance: IngressProvenance,
-    pub request_id: String,
-    pub deadline: Option<Deadline>,
 }
 
-pub struct PageHttpResponse {
-    pub status: u16,
-    pub headers: Vec<(String, String)>,
-    pub set_cookies: Vec<String>,
-    pub body: Vec<u8>,
+pub struct PageInvocation {
+    pub context: ores_api_docs_client::PageContext,
+    pub wasm_have: Option<String>,
+    pub head: bool,
 }
 
-pub async fn invoke_page(
+pub fn admit_page_request(
     request: PageHttpRequest,
     state: ores_api_docs_client::PageState,
-    canonical_route: &'static str,
     axum_paths: &'static [&'static str],
-    page: ores_api_docs_client::PageFn,
-    finalize: ores_api_docs_client::PageFinalizeFn,
-) -> Result<PageHttpResponse, RuntimeError>;
+) -> Result<PageInvocation, PageHttpResponse>;
 
-impl RuntimeError {
-    pub fn state_init(error: ores_api_docs_client::PageLambdaStateError) -> Self;
-}
-
-pub mod aws {
-    pub async fn run_page<H, Fut>(
-        state: PageState,
-        handler: H,
-    ) -> Result<(), RuntimeError>;
-}
-
-pub mod gcp {
-    pub async fn run_page<H, Fut>(
-        state: PageState,
-        handler: H,
-    ) -> Result<(), RuntimeError>;
-}
+pub fn finish_page_response(
+    finalized: ores_api_docs_client::FinalizedPageResponse,
+    head: bool,
+) -> PageHttpResponse;
 ```
 
-`invoke_page` performs request admission, route matching, middleware and page invocation, then calls the supplied `PageFinalizeFn` with request-scoped finalization hints. Only after that does the provider adapter translate the finalized response into AWS/GCP wire format.
+Provider wrappers therefore execute:
 
-## Execution order
+```text
+provider event/http
+  -> provider adapter normalization
+  -> admit_page_request
+  -> generated_lambda::run(invocation.context, invocation.hints())
+  -> finish_page_response
+  -> provider response envelope
+```
 
-The order is explicit and fail-closed:
+AWS/GCP outer loops remain generic `run_page(state, handler)` hosts. They do not import product routing or page code directly.
 
-1. provider envelope size/shape admission;
-2. trusted provider identity and ingress provenance;
-3. request-header normalization;
-4. GET/HEAD admission;
-5. filesystem-route match and route-param extraction;
-6. web/admin-web auth and session middleware;
-7. tracing/deadline propagation;
-8. `PageContext` construction;
-9. `PageFn` invocation;
-10. `PageFinalizeFn` invocation;
-11. provider response conversion.
+## Fail-closed execution order
 
-Any rejection before step 9 must prove the page function was not called. Provider conversion must never re-run page finalization.
+1. provider envelope shape/size admission;
+2. trusted provider context -> `IngressProvenance`;
+3. lowercase header normalization and count/byte limits;
+4. cookie count/byte limits;
+5. GET/HEAD admission and body rejection;
+6. raw-path validation and exact-once segment percent decoding;
+7. one generated page-pattern match and route-param extraction;
+8. ambiguous sensitive-header rejection;
+9. shared auth/session middleware when that ABI is available;
+10. `PageContext` construction;
+11. generated `lambda.rs::run` page invocation + shared finalization;
+12. HEAD body suppression after finalization;
+13. provider response-envelope conversion.
 
-## Shared finalization contract
+Malformed client paths return stable 400 responses. Malformed generated route patterns are server/build faults and return stable non-cacheable 500 responses rather than blaming the client.
 
-`PageFinalizeFn` is generated per page by `page_router_glue`. It calls the Axum-free `ores_api_docs_client::finalize_page_response` with the page's admitted:
+## Raw path semantics
 
-- CSS public path;
-- finalized WASM SHA-256;
-- JS public path.
-
-The provider runtime supplies only request-scoped hints such as `x-ores-wasm-have`; development reload hints are local standalone concerns and normally absent in cloud runtimes.
-
-The result is a provider-neutral `FinalizedPageResponse { status, headers, body }`. The same finalizer is called by standalone Axum and the page Lambda, so page status/body/content-type/CSS/WASM behavior has one implementation path.
-
-Render failures become stable non-cacheable 500 responses without reflecting `PageError` details to browsers. Detailed causes belong in server-side telemetry.
-
-## Raw URI and percent-decoding
-
-Raw-path semantics must be identical across AWS and GCP:
-
-- Preserve `raw_path` and `raw_query`; never reconstruct them from decoded provider fields.
-- Split the raw path on `/` **before** percent-decoding.
+- Preserve the provider's raw path; never reconstruct it from decoded fields.
+- Split on `/` before decoding.
 - Percent-decode each segment exactly once.
 - `%2F` inside a segment is data, not a separator.
-- Reject invalid percent escapes, invalid UTF-8 after decoding, NUL, and decoded `.` or `..` segments.
-- A decoded `%25` remains a literal `%`; no later component decodes again.
-- Catch-all params are decoded segments rejoined with `/`.
-- `PageContext.request_path` retains the raw path.
+- Reject invalid escapes, invalid UTF-8, NUL and decoded `.` / `..` segments.
+- `%25` remains literal `%`; no later layer decodes again.
+- Catch-all params rejoin already-decoded segments with `/`.
+- `PageContext.request_path` retains the raw request path.
+- Generated route patterns are bounded and malformed/duplicate capture patterns fail as server errors.
 
-Route-matching fixtures must be shared with `api-docs::FsRoute`/standalone Axum tests for static, dynamic, catch-all and optional-catch-all routes.
+## Headers, cookies and bodies
 
-## Bodies
+Requests are bounded before page execution:
 
-AWS payloads may carry `isBase64Encoded` + `body`.
+- body bytes are capped before/after AWS base64 decoding;
+- header count, individual values and aggregate bytes are bounded;
+- cookie count, individual values and aggregate bytes are bounded;
+- CR/LF/NUL in normalized header/cookie inputs is rejected;
+- `host`, `authorization` and `content-length` must be semantically unambiguous;
+- repeated response `Set-Cookie` values remain separate and are never comma-folded.
 
-The adapter:
-
-- bounds encoded size before allocating;
-- decodes exactly once;
-- enforces the configured bound on decoded bytes;
-- rejects invalid base64 with 400 before page invocation;
-- rejects GET/HEAD bodies for the first contract;
-- decides AWS response base64 encoding from the finalized response content, never from page-controlled provider flags.
-
-## Headers
-
-`ClientHeaders` is untrusted, lowercase-normalized and multi-valued.
-
-Do not blindly split comma-containing provider values: API Gateway v2 may already coalesce duplicates, and several legal header values contain commas. Security-sensitive inputs such as `host`, `authorization`, `content-length`, and the configured session cookie must have one unambiguous semantic value or the request is rejected.
-
-Provider identity is never inferred from headers.
-
-## Cookies
-
-Request normalization has one cookie source:
-
-- API Gateway v2 `cookies[]` is parsed into `ClientCookies`;
-- Function URL/GCP `cookie` header is parsed into the same structure;
-- the raw `cookie` header is then removed from the generic header view.
-
-Response `Set-Cookie` is never comma-folded. Repeated finalized `set-cookie` headers are separated before provider translation:
-
-- AWS payload v2 -> `cookies[]`;
-- GCP HTTP -> repeated `Set-Cookie` headers.
-
-Fixtures must include multiple cookies and an `Expires=Wed, 21 Oct ...` value containing a comma.
-
-## HEAD parity
-
-HEAD follows the same matcher, auth, page invocation and `PageFinalizeFn` path as GET. The provider adapter drops the body only after finalization.
-
-Status and semantic headers must match GET. If `content-length` is emitted, it describes the GET body length before the HEAD body is dropped. A page cannot observe whether the request was GET or HEAD.
+AWS API Gateway v2 emits repeated cookies through `cookies[]`; GCP HTTP emits repeated `Set-Cookie` headers.
 
 ## Trusted provenance
 
-`IngressProvenance` is a provider-created capability, not a parsed header bag.
+`IngressProvenance` is provider-created capability data, never inferred from browser-controlled headers.
 
-Requirements:
+- AWS request IDs come from Lambda/provider event context.
+- Generic GCP/Cloud Run forwarding/trace headers remain untrusted unless a future adapter validates authenticated platform metadata out of band.
+- `x-forwarded-*`, `forwarded`, `x-amzn-*`, `x-goog-*` and trace headers do not become caller identity merely because a client supplied them.
 
-- no public constructor usable by product/page code;
-- no `From<&ClientHeaders>` conversion;
-- AWS builds it from validated provider event context;
-- GCP builds it from validated platform/request context;
-- middleware that needs scheme, client IP or caller identity receives provenance, not forwarded headers.
+Authenticated/admin page deployment remains blocked until the shared auth/session middleware ABI is wired and proven in this outer provider boundary.
 
-Client-supplied `x-forwarded-*`, `forwarded`, `x-amzn-*`, `x-goog-*`, and trace headers remain untrusted strings unless a provider adapter explicitly validates the corresponding platform context.
+## HEAD semantics
+
+HEAD uses the same route admission and generated `lambda.rs::run` path as GET. Only after the page has been finalized does `finish_page_response` remove the body. Status and semantic headers therefore come from the same response authority as GET.
 
 ## AWS host
 
-Initial AWS support:
+Initial AWS support targets API Gateway HTTP API payload v2 / Lambda Function URLs through the Rust Lambda runtime on the OS-only Lambda environment.
 
-- Rust Lambda runtime on `provided.al2023`;
-- API Gateway HTTP API payload v2;
-- Lambda Function URLs.
-
-Generated `main` calls:
+The generated build-only wrapper conceptually does:
 
 ```rust
+#[path = "<exact-server-lambda.rs>"]
+mod generated_lambda;
+
 #[tokio::main]
 async fn main() -> Result<(), RuntimeError> {
-    let state = __ORES_PAGE_STATE().await.map_err(RuntimeError::state_init)?;
-    ores_page_lambda_runtime::aws::run_page(state, __ores_handle_page).await
+    let state = generated_lambda::init_state()
+        .await
+        .map_err(RuntimeError::state_init)?;
+
+    page_runtime::aws::run_page(state, |state, request| async move {
+        match page_runtime::admit_page_request(
+            request,
+            state,
+            generated_lambda::ORES_PAGE_AXUM_PATHS,
+        ) {
+            Ok(invocation) => {
+                let finalized = generated_lambda::run(
+                    invocation.context,
+                    invocation.hints(),
+                )
+                .await;
+                Ok(page_runtime::finish_page_response(finalized, invocation.head))
+            }
+            Err(response) => Ok(response),
+        }
+    })
+    .await
 }
 ```
 
-`run_page` owns the invocation loop and provider event/response translation. It does not start the product Axum TCP listener.
-
-ALB can be added later with its own explicit normalization fixtures. Direct/SQS/background invocation belongs to the operation/background-function runtime, not this browser-page surface.
+The provider wrapper is ignored/generated build material. No AWS runtime symbols live in server sibling `lambda.rs`.
 
 ## GCP host
 
-GCP exposes the same page handler through the supported HTTP/custom-runtime/OS-only hosting path. The generated page source must not assume a managed Rust language runtime.
+The GCP wrapper uses the same generated server module and admission/finalization sequence. The GCP runtime adapter may own the required `PORT` listener; `$PORT` and listener lifecycle are provider infrastructure and do not belong in generated server source.
 
-For container/HTTP hosting, `gcp::run_page` may own the required `PORT` listener. That listener is provider-host infrastructure for one page artifact, not the product's complete application router.
+## Reproducibility
 
-Cloud Trace/request metadata is propagated only from validated provider context.
+- `ores-api-docs-client` is pinned to the exact reviewed api-docs head.
+- Cargo.lock is Cargo-generated and release/test builds use `--locked`.
+- Provider wrapper/build receipts bind exact server source, generated module SHA-256, api-docs revision, provider runtime revision, provider/architecture and toolchain.
+- No floating `main` revision is accepted as exact-source evidence.
+- Ordinary source/build commands never deploy cloud resources implicitly.
 
-## State lifecycle
+## Required conformance
 
-`__ORES_PAGE_STATE` is a `PageLambdaStateFn`. The generated binary calls it once before entering the provider invocation loop, giving normal cold-start reuse.
+Before broad rollout, prove at least:
 
-The constructor must be the same semantic application-state constructor used by the standalone web server. If local Axum and Lambda initialize different auth/database/config state, parity has already failed before page invocation.
+- standalone + AWS + GCP use the same generated `lambda.rs` bytes;
+- route params agree for static/dynamic/catch-all/optional-catch-all cases;
+- malformed request paths fail before generated-module execution;
+- malformed generated patterns are stable server failures;
+- invalid/oversized base64 bodies fail before execution;
+- untrusted headers cannot forge provenance;
+- duplicate sensitive headers fail closed;
+- request/response cookies preserve multiplicity;
+- HEAD runs the same generated page/finalizer then drops only the body;
+- render errors do not expose internal details;
+- auth/session pages remain deployment-blocked until middleware parity is proven;
+- generated server `lambda.rs` contains no `main()`, provider SDK/runtime selection, credentials or mutable deployment config.
 
-State initialization errors are logged server-side and converted to stable provider/runtime errors; secrets and internal error text are not sent to browsers.
+## Relationship to other runtimes
 
-## Static generation and assets
-
-`gen.rs` remains build-time only and is never executed during a request.
-
-The per-page finalizer receives immutable finalized asset references from generated page glue. Packaging may embed immutable assets or point to digest-addressed CDN/object-store paths, but the semantic asset metadata is build-time authority and is digest-bound in the deployment receipt.
-
-## Tests required before template rollout
-
-At minimum:
-
-- standalone/AWS/GCP normalized request fixtures produce the same finalized status/body/semantic headers;
-- route params match for static, dynamic, catch-all and optional catch-all paths;
-- malformed URI/percent encodings fail before page invocation;
-- invalid/oversized base64 bodies fail before page invocation;
-- untrusted headers cannot forge `IngressProvenance`;
-- duplicate security-sensitive headers fail closed;
-- request and response cookie normalization preserves multiple cookies;
-- HEAD matches GET metadata and returns no body;
-- auth/middleware rejection proves the page was not invoked;
-- deadlines/cancellation propagate where provider APIs expose them;
-- page render errors do not leak internal details;
-- the provider runtime contains no product business/domain routing;
-- generated `lambda.rs` contains no credentials or mutable deployment config;
-- `api-docs#176` compile fixture builds the generated bin under AWS and GCP features with both `PageFn` and `PageFinalizeFn`.
-
-## Relationship to the existing template runtime
-
-The current command-envelope runtime (`worker-aws`, `worker-http`, portable workers) remains the surface for bounded background/integration commands.
-
-Page HTTP runtime is an additional narrow surface with browser HTTP semantics. The shared abstraction between the two is hardened provider hosting and deterministic generated artifacts, not a shared command envelope or RPC identity.
+The existing command-envelope/background runtime remains separate. Web-page HTTP shares hardened provider-hosting primitives and reproducible build practices with that runtime, but it does not share RPC identity or command-envelope semantics.
