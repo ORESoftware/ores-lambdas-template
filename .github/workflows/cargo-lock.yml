@@ -44,16 +44,15 @@ jobs:
         with:
           toolchain: '1.88'
 
-      - name: Generate candidate only when the repository has no lock
+      - name: Generate exact Cargo lock candidate
         shell: bash
         run: |
           set -euo pipefail
           if [ -f Cargo.lock ]; then
-            echo 'validating committed Cargo.lock'
-          else
-            echo 'Cargo.lock is absent; generating a reviewable candidate'
-            cargo generate-lockfile
+            cp Cargo.lock Cargo.lock.committed
           fi
+          cargo generate-lockfile
+          cp Cargo.lock Cargo.lock.candidate
           cargo metadata --locked --all-features --format-version 1 >/dev/null
 
       - name: Audit immutable source and checksum coverage
@@ -65,10 +64,10 @@ jobs:
           import tomllib
           from pathlib import Path
 
-          lock = tomllib.loads(Path('Cargo.lock').read_text(encoding='utf-8'))
+          lock = tomllib.loads(Path('Cargo.lock.candidate').read_text(encoding='utf-8'))
           packages = lock.get('package', [])
           if not packages:
-              raise SystemExit('Cargo.lock contains no packages')
+              raise SystemExit('Cargo.lock candidate contains no packages')
 
           for package in packages:
               name = package.get('name', '<unknown>')
@@ -78,7 +77,7 @@ jobs:
               if source.startswith('git+'):
                   fragment = source.rsplit('#', 1)[-1]
                   if not re.fullmatch(r'[0-9a-f]{40}', fragment):
-                      raise SystemExit(f'git dependency is not immutable in Cargo.lock: {name}')
+                      raise SystemExit(f'git dependency is not immutable in Cargo.lock candidate: {name}')
               elif source.startswith('registry+'):
                   checksum = package.get('checksum')
                   if not isinstance(checksum, str) or not re.fullmatch(r'[0-9a-f]{64}', checksum):
@@ -87,16 +86,31 @@ jobs:
                   raise SystemExit(f'unapproved Cargo source scheme for {name}: {source}')
           PY
 
-      - name: Record exact lock digest
+      - name: Record exact candidate digest
         shell: bash
-        run: sha256sum Cargo.lock > Cargo.lock.sha256
+        run: sha256sum Cargo.lock.candidate > Cargo.lock.candidate.sha256
 
-      - name: Retain exact lock candidate or committed-lock evidence
+      - name: Retain committed and candidate lock evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cargo-lock-${{ github.run_id }}
           path: |
-            Cargo.lock
-            Cargo.lock.sha256
+            Cargo.lock.candidate
+            Cargo.lock.candidate.sha256
+            Cargo.lock.committed
           if-no-files-found: error
           retention-days: 30
+
+      - name: Require committed lock to equal Cargo candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f Cargo.lock.committed ]; then
+            echo 'Cargo.lock is missing; use the uploaded Cargo.lock.candidate verbatim' >&2
+            exit 1
+          fi
+          if ! cmp -s Cargo.lock.committed Cargo.lock.candidate; then
+            echo 'Cargo.lock drift: use the uploaded Cargo.lock.candidate verbatim' >&2
+            diff -u Cargo.lock.committed Cargo.lock.candidate || true
+            exit 1
+          fi
