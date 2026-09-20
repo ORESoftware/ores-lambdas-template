@@ -116,10 +116,11 @@ mod page_invoke_tests {
     };
     use std::{
         collections::BTreeMap,
-        sync::atomic::{AtomicUsize, Ordering},
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        },
     };
-
-    static PAGE_RUNS: AtomicUsize = AtomicUsize::new(0);
 
     fn request(method: PageHttpMethod) -> PageHttpRequest {
         PageHttpRequest {
@@ -157,15 +158,16 @@ mod page_invoke_tests {
 
     #[tokio::test]
     async fn rejected_session_admission_never_executes_page_code() {
-        PAGE_RUNS.store(0, Ordering::SeqCst);
+        let runs = Arc::new(AtomicUsize::new(0));
+        let runs_in_page = Arc::clone(&runs);
         let response = invoke_page(
             request(PageHttpMethod::Get),
             PageState::default(),
             "session",
             &["/private/{id}"],
             reject_session,
-            |_context, _wasm_have| async {
-                PAGE_RUNS.fetch_add(1, Ordering::SeqCst);
+            move |_context, _wasm_have| async move {
+                runs_in_page.fetch_add(1, Ordering::SeqCst);
                 FinalizedPageResponse {
                     status: 200,
                     headers: Vec::new(),
@@ -178,20 +180,21 @@ mod page_invoke_tests {
 
         assert_eq!(response.status, 401);
         assert_eq!(response.body, b"authentication required");
-        assert_eq!(PAGE_RUNS.load(Ordering::SeqCst), 0);
+        assert_eq!(runs.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
     async fn admitted_session_context_is_the_only_context_given_to_page_code() {
-        PAGE_RUNS.store(0, Ordering::SeqCst);
+        let runs = Arc::new(AtomicUsize::new(0));
+        let runs_in_page = Arc::clone(&runs);
         let response = invoke_page(
             request(PageHttpMethod::Get),
             PageState::default(),
             "session",
             &["/private/{id}"],
             allow_session,
-            |context, _wasm_have| async move {
-                PAGE_RUNS.fetch_add(1, Ordering::SeqCst);
+            move |context, _wasm_have| async move {
+                runs_in_page.fetch_add(1, Ordering::SeqCst);
                 assert_eq!(
                     context.route_params.get("id").map(String::as_str),
                     Some("42")
@@ -208,20 +211,21 @@ mod page_invoke_tests {
 
         assert_eq!(response.status, 200);
         assert_eq!(response.body, b"rendered");
-        assert_eq!(PAGE_RUNS.load(Ordering::SeqCst), 1);
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
     async fn public_page_uses_builtin_admission_and_runs_once() {
-        PAGE_RUNS.store(0, Ordering::SeqCst);
+        let runs = Arc::new(AtomicUsize::new(0));
+        let runs_in_page = Arc::clone(&runs);
         let response = invoke_page(
             request(PageHttpMethod::Get),
             PageState::default(),
             "public",
             &["/private/{id}"],
             admit_public_page,
-            |context, _wasm_have| async move {
-                PAGE_RUNS.fetch_add(1, Ordering::SeqCst);
+            move |context, _wasm_have| async move {
+                runs_in_page.fetch_add(1, Ordering::SeqCst);
                 assert_eq!(
                     context.route_params.get("id").map(String::as_str),
                     Some("42")
@@ -238,20 +242,21 @@ mod page_invoke_tests {
 
         assert_eq!(response.status, 200);
         assert_eq!(response.body, b"public-rendered");
-        assert_eq!(PAGE_RUNS.load(Ordering::SeqCst), 1);
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
     async fn builtin_public_admission_cannot_downgrade_session_page() {
-        PAGE_RUNS.store(0, Ordering::SeqCst);
+        let runs = Arc::new(AtomicUsize::new(0));
+        let runs_in_page = Arc::clone(&runs);
         let response = invoke_page(
             request(PageHttpMethod::Get),
             PageState::default(),
             "session",
             &["/private/{id}"],
             admit_public_page,
-            |_context, _wasm_have| async {
-                PAGE_RUNS.fetch_add(1, Ordering::SeqCst);
+            move |_context, _wasm_have| async move {
+                runs_in_page.fetch_add(1, Ordering::SeqCst);
                 FinalizedPageResponse {
                     status: 200,
                     headers: Vec::new(),
@@ -267,7 +272,7 @@ mod page_invoke_tests {
             response.body,
             b"page authentication middleware is not configured"
         );
-        assert_eq!(PAGE_RUNS.load(Ordering::SeqCst), 0);
+        assert_eq!(runs.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
