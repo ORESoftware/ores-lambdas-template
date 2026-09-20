@@ -1094,7 +1094,7 @@ dependencies = [
 [[package]]
 name = "ores-middleware"
 version = "0.1.0"
-source = "git+https://github.com/ORESoftware/ores-middleware.git?rev=5b1741e493c235ff3241ef9b9ec4813e7f54c3f7#5b1741e493c235ff3241ef9b9ec4813e7f54c3f7"
+source = "git+https://github.com/ORESoftware/ores-middleware.git?rev=9d81ca1e75817d2c5d76f0bc59619b4e0c3e5fd9#9d81ca1e75817d2c5d76f0bc59619b4e0c3e5fd9"
 dependencies = [
  "axum",
  "futures-util",
