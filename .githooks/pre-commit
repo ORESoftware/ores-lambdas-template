@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+set -eu
+root="$(git rev-parse --show-toplevel)"; cd "$root"
+if ! git diff --cached --name-only --diff-filter=ACMR -- contracts conformance schema-authority config/concerns .zpkg.toml zed-env.toml .zed .githooks scripts | grep -q .; then exit 0; fi
+sh conformance/check.sh --structural-only

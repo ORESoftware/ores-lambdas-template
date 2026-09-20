@@ -1,0 +1,15 @@
+#!/usr/bin/env sh
+set -eu
+root="$(git rev-parse --show-toplevel)"; cd "$root"
+command -v zed >/dev/null 2>&1 || { echo 'zed is required for pre-push Lambda contract admission' >&2; exit 1; }
+pack_dir="${TMPDIR:-/tmp}/ores-lambda-zed-pack-$$"; trap 'rm -rf "$pack_dir"' EXIT INT TERM
+zed validate
+zed install
+[ -f .zpkg.lock ] || { echo '.zpkg.lock missing after zed install' >&2; exit 1; }
+zed validate --require-lock
+zed install --frozen
+zed build
+zed run test
+mkdir -p "$pack_dir"; zed pack --out "$pack_dir"
+git ls-files --error-unmatch .zpkg.lock >/dev/null 2>&1 || { echo '.zpkg.lock must be committed' >&2; exit 1; }
+git diff --exit-code -- .zpkg.lock

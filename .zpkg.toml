@@ -13,12 +13,23 @@ url = "https://github.com/__ORG__/__PREFIX__-lambdas"
 [dependencies]
 "flags-2-env/flags-2-env" = "^0.3.0"
 "oresoftware/next-loggers" = "^0.1.0"
+"oresoftware/typespec-json-schema-validator" = "^0.1.0"
 
 [build]
 command = "cargo build --release --features http,portable"
 
+[targets.contracts]
+dir = "contracts"
+name = "__PREFIX__-lambda-contracts"
+adapter = "none"
+
+[targets.conformance]
+dir = "conformance"
+name = "__PREFIX__-lambda-conformance"
+adapter = "none"
+
 [scripts]
-test = "cargo test --features http,portable,aws --all-targets"
+test = "sh conformance/check.sh --full"
 
 [publish]
 include_readme = true
