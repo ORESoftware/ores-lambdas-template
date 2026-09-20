@@ -7,10 +7,13 @@ on:
       - 'Cargo.lock'
       - 'src/**'
       - 'tests/**'
+      - 'config/**'
       - 'Dockerfile'
       - 'Containerfile'
       - 'entrypoint.sh'
       - '.cli-flags.toml'
+      - '.ores-mw.toml'
+      - '.ores-otel.toml'
       - '.github/workflows/runtime-hardening.yml'
   push:
     branches: [main]
@@ -19,10 +22,13 @@ on:
       - 'Cargo.lock'
       - 'src/**'
       - 'tests/**'
+      - 'config/**'
       - 'Dockerfile'
       - 'Containerfile'
       - 'entrypoint.sh'
       - '.cli-flags.toml'
+      - '.ores-mw.toml'
+      - '.ores-otel.toml'
       - '.github/workflows/runtime-hardening.yml'
   workflow_dispatch:
 
@@ -108,6 +114,39 @@ jobs:
             --tag lambdas-runtime-smoke:${EXPECTED_SHA} \
             --load .
 
+      - name: Prove runtime user can read but not mutate policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --platform linux/amd64 \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --entrypoint /bin/sh \
+            "lambdas-runtime-smoke:${EXPECTED_SHA}" \
+            -c '
+              set -eu
+              test "$(id -u)" != 0
+              test -x /app
+              test -x /app/config
+              for path in \
+                /app/.cli-flags.toml \
+                /app/.ores-mw.toml \
+                /app/.ores-otel.toml \
+                /app/config/ores-middleware.stack.json
+              do
+                test -r "$path"
+                test ! -w "$path"
+              done
+              cat /app/.ores-mw.toml >/dev/null
+              cat /app/config/ores-middleware.stack.json >/dev/null
+              if touch /app/runtime-must-not-write 2>/dev/null; then
+                echo "read-only runtime unexpectedly allowed /app write" >&2
+                exit 1
+              fi
+            '
+
       - name: Execute hardened probes and trusted-context invocation
         shell: bash
         run: |
@@ -148,7 +187,6 @@ jobs:
           curl --fail --silent --show-error http://127.0.0.1:18080/readyz >/dev/null
 
           test "$(docker exec "${container}" id -u)" != '0'
-          docker exec "${container}" sh -c 'test -r /app/.cli-flags.toml && test ! -w /app/.cli-flags.toml'
           if docker exec "${container}" sh -c 'touch /app/runtime-must-not-write'; then
             echo 'read-only runtime unexpectedly allowed a root-filesystem write' >&2
             exit 1
