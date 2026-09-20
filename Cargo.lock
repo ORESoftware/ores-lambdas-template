@@ -988,7 +988,7 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 [[package]]
 name = "ores-api-docs"
 version = "0.1.0"
-source = "git+https://github.com/ORESoftware/api-docs.git?rev=e3b8225b88d83d5830b6d1aab9549900ca225bcc#e3b8225b88d83d5830b6d1aab9549900ca225bcc"
+source = "git+https://github.com/ORESoftware/api-docs.git?rev=f58db5a020339879b6aa0b5404c59b4bd9cb2357#f58db5a020339879b6aa0b5404c59b4bd9cb2357"
 dependencies = [
  "jsonschema",
  "serde",
@@ -1000,7 +1000,7 @@ dependencies = [
 [[package]]
 name = "ores-api-docs-client"
 version = "0.1.0"
-source = "git+https://github.com/ORESoftware/api-docs.git?rev=e3b8225b88d83d5830b6d1aab9549900ca225bcc#e3b8225b88d83d5830b6d1aab9549900ca225bcc"
+source = "git+https://github.com/ORESoftware/api-docs.git?rev=f58db5a020339879b6aa0b5404c59b4bd9cb2357#f58db5a020339879b6aa0b5404c59b4bd9cb2357"
 dependencies = [
  "ores-api-docs",
 ]
