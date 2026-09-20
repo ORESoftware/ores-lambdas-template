@@ -121,7 +121,7 @@ jobs:
 
   # Temporary self-repair lane for this same-repository draft only. It keeps the
   # candidate bytes entirely inside GitHub after the read-only job has generated,
-  # resolved and audited them. Remove this job once the repaired lock is green.
+  # resolved and audited them. Remove this branch exception once the repaired lock is green.
   repair-draft-lock:
     needs: lock-contract
     if: >-
@@ -129,7 +129,8 @@ jobs:
         always() &&
         github.event_name == 'pull_request' &&
         github.event.pull_request.head.repo.full_name == github.repository &&
-        github.event.pull_request.head.ref == 'draft/web-page-lambda-runtime' &&
+        github.event.pull_request.draft == true &&
+        github.event.pull_request.head.ref == 'feat/ores-lambda-fleet-contract-20260920' &&
         needs.lock-contract.outputs.candidate_valid == 'true' &&
         needs.lock-contract.result == 'failure'
       }}
