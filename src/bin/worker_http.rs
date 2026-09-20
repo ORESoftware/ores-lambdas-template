@@ -82,10 +82,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = install_from_env(router(HttpConfig { provider }), "__PREFIX__-lambdas")?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
     eprintln!("__PREFIX__-lambdas worker-http listening on {addr} as {provider:?}");
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
-        .await?;
+    // The middleware's application rate-limit policy can use the peer IP as a
+    // principal signal. Serve through Axum's connect-info make-service so every
+    // request, including readiness probes, carries the actual accepted socket
+    // address instead of failing closed with `rate_limit_principal_unavailable`.
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(async {
+        let _ = tokio::signal::ctrl_c().await;
+    })
+    .await?;
     Ok(())
 }
