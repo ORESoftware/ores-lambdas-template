@@ -147,11 +147,14 @@ impl std::error::Error for RuntimeError {
 ///
 /// This function deliberately does **not** invoke `PageFn` or `PageFinalizeFn`.
 /// Those are bound into generated server `lambda.rs::run`, so test and provider
-/// builds execute the same page/finalizer authority.
+/// builds execute the same page/finalizer authority. Path templates are borrowed
+/// only for the duration of this synchronous admission step; provider hosts may
+/// pass generated static slices, while tests and other callers need not manufacture
+/// a `'static` container for already-static strings.
 pub fn admit_page_request(
     request: PageHttpRequest,
     state: PageState,
-    axum_paths: &'static [&'static str],
+    axum_paths: &[&str],
 ) -> Result<PageInvocation, PageHttpResponse> {
     if request.method == PageHttpMethod::Unsupported {
         return Err(PageHttpResponse::text(405, "method not allowed"));
