@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  TJSV_REVISION: 03ccc0ecdfc70f9198c3ccf80718910961d3fde1
+  TJSV_REVISION: bd503465dab8c5148fee722b443ed04ff126c9bf
   CARGO_LAMBDA_VERSION: 1.9.2
   CARGO_LAMBDA_X86_64_SHA256: b5c258c424ebaef39541c3641f33c51137ee6c426016f365628fedb2c737271d
   ZIG_VERSION: 0.13.0
@@ -105,7 +105,7 @@ jobs:
           persist-credentials: false
           show-progress: false
       - name: Enforce independent TypeSpec and JSON Schema authorities
-        uses: ORESoftware/typespec-json-schema-validator@03ccc0ecdfc70f9198c3ccf80718910961d3fde1
+        uses: ORESoftware/typespec-json-schema-validator@bd503465dab8c5148fee722b443ed04ff126c9bf
         with:
           typespec: schema-authority/main.tsp
           schema: schema-authority/authored.schema.json
