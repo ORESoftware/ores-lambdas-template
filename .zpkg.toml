@@ -14,11 +14,31 @@ url = "https://github.com/__ORG__/__PREFIX__-lambdas"
 "flags-2-env/flags-2-env" = "^0.3.0"
 "oresoftware/next-loggers" = "^0.1.0"
 
+[install]
+dir = ".vendor/.zed"
+
+[targets.repository]
+dir = "."
+adapter = "none"
+
+[targets.rust]
+dir = "."
+adapter = "rust"
+
+[targets.contracts]
+dir = "contracts"
+adapter = "none"
+
+[targets.conformance]
+dir = "conformance"
+adapter = "none"
+
 [build]
-command = "cargo build --release --features http,portable"
+command = "cargo build --locked --release --features http,portable"
 
 [scripts]
-test = "cargo test --features http,portable,aws --all-targets"
+test = "sh conformance/check.sh"
+conformance = "sh conformance/check.sh"
 
 [publish]
 include_readme = true
