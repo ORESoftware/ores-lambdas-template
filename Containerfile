@@ -43,10 +43,22 @@ RUN apt-get update \
     && useradd --system --gid lambda --home-dir /nonexistent --no-create-home lambda
 COPY --from=builder /out/lambda /usr/local/bin/lambda
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-# flags-2-env audits this contract before the listener starts. Keep it at a stable read-only path.
 WORKDIR /app
+# Runtime policy must travel with the binary. The worker fails closed if the
+# middleware manifest or selected stack is missing, so keep the full admitted
+# policy envelope at stable, read-only paths inside every OCI image.
 COPY --chmod=0444 .cli-flags.toml /app/.cli-flags.toml
-RUN chmod 0555 /usr/local/bin/lambda /usr/local/bin/entrypoint.sh
+COPY --chmod=0444 .ores-mw.toml /app/.ores-mw.toml
+COPY --chmod=0444 .ores-otel.toml /app/.ores-otel.toml
+COPY --chmod=0444 config/ores-middleware.stack.json /app/config/ores-middleware.stack.json
+RUN chmod 0555 /usr/local/bin/lambda /usr/local/bin/entrypoint.sh \
+    && test -r /app/.ores-mw.toml \
+    && test -r /app/.ores-otel.toml \
+    && test -r /app/config/ores-middleware.stack.json \
+    && test "$(stat -c '%a' /app/.cli-flags.toml)" = 444 \
+    && test "$(stat -c '%a' /app/.ores-mw.toml)" = 444 \
+    && test "$(stat -c '%a' /app/.ores-otel.toml)" = 444 \
+    && test "$(stat -c '%a' /app/config/ores-middleware.stack.json)" = 444
 USER lambda
 ENV PORT=8080 \
     LAMBDA_SIDECAR_MODE=combined \

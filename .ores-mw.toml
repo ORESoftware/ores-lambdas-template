@@ -1,0 +1,13 @@
+# Canonical middleware runtime selection for generated Lambda repositories.
+# The HTTP worker admits this file before binding; callback/event adapters use
+# the same target as their invocation-boundary support lands.
+schema_version = 1
+repository_mode = "server-only"
+default_target = "portable-adapters"
+
+[[targets]]
+name = "portable-adapters"
+role = "server"
+roots = ["src"]
+middleware = "stack"
+stack_config = "config/ores-middleware.stack.json"
