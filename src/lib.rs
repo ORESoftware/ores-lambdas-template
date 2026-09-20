@@ -143,12 +143,7 @@ mod page_invoke_tests {
         assert_eq!(input.request.raw_query.as_deref(), Some("view=full"));
         assert!(input.request.headers.contains_key("authorization"));
         assert_eq!(input.request.cookies.len(), 1);
-        Box::pin(async move {
-            Err(PageAdmissionRejection::text(
-                401,
-                "authentication required",
-            ))
-        })
+        Box::pin(async move { Err(PageAdmissionRejection::text(401, "authentication required")) })
     }
 
     fn allow_session(input: PageAdmissionInput) -> PageAdmissionFuture {
@@ -197,7 +192,10 @@ mod page_invoke_tests {
             allow_session,
             |context, _wasm_have| async move {
                 PAGE_RUNS.fetch_add(1, Ordering::SeqCst);
-                assert_eq!(context.route_params.get("id").map(String::as_str), Some("42"));
+                assert_eq!(
+                    context.route_params.get("id").map(String::as_str),
+                    Some("42")
+                );
                 FinalizedPageResponse {
                     status: 200,
                     headers: vec![("content-type".to_owned(), "text/html".to_owned())],
