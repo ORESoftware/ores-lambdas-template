@@ -37,7 +37,7 @@ async fn main() -> Result<(), Error> {
                 })
                 .await
                 .map_err(|error| -> Error { Box::new(error) })?;
-            Ok::<_, Error>(require_completed(outcome)?)
+            require_completed(outcome)
         }
     }))
     .await
