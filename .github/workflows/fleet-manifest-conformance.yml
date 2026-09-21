@@ -67,6 +67,38 @@ jobs:
             --root . \
             --authority-sha "${ORES_LAMBDA_AUTHORITY_SHA}"
 
+      - name: Prove undeclared Cargo entrypoint fails closed
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .ores-lambda.toml "${RUNNER_TEMP}/ores-lambda.toml"
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('.ores-lambda.toml')
+          source = path.read_text(encoding='utf-8')
+          needle = 'entrypoint = "worker-http"'
+          if source.count(needle) != 1:
+              raise SystemExit(f'expected exactly one {needle!r} before drift mutation')
+          path.write_text(source.replace(needle, 'entrypoint = "missing-worker"', 1), encoding='utf-8')
+          PY
+          set +e
+          python3 scripts/check-fleet-repository.py \
+            --root . \
+            --authority-sha "${ORES_LAMBDA_AUTHORITY_SHA}" \
+            >"${RUNNER_TEMP}/entrypoint-drift.stdout" \
+            2>"${RUNNER_TEMP}/entrypoint-drift.stderr"
+          rc=$?
+          set -e
+          mv "${RUNNER_TEMP}/ores-lambda.toml" .ores-lambda.toml
+          if [ "$rc" -ne 2 ]; then
+            cat "${RUNNER_TEMP}/entrypoint-drift.stdout" >&2 || true
+            cat "${RUNNER_TEMP}/entrypoint-drift.stderr" >&2 || true
+            echo "expected undeclared entrypoint drift to fail with exit 2, got $rc" >&2
+            exit 1
+          fi
+          grep -F "entrypoint 'missing-worker' is not a Cargo binary" "${RUNNER_TEMP}/entrypoint-drift.stderr"
+          git diff --exit-code -- .ores-lambda.toml
+
       - name: Verify repository structural lifecycle
         shell: bash
         run: sh conformance/check.sh --structural-only
