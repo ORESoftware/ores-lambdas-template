@@ -59,11 +59,15 @@ jobs:
           name = "ores-lambda"
           adapter = "rust"
 
+          # Publish the authored contract authorities independently so non-Rust consumers
+          # can depend on the wire contract without copying the Rust workspace.
           [targets.contracts]
           dir = "contracts"
           name = "ores-lambda-contracts"
           adapter = "none"
 
+          # Publish the executable fixture/vector corpus independently so every runtime
+          # can prove behavior against the same reviewed cases.
           [targets.conformance]
           dir = "conformance"
           name = "ores-lambda-conformance"
@@ -87,6 +91,8 @@ jobs:
             ".DS_Store",
           ]
 
+          # Current zed-pkg manifests expose only the package-level test lifecycle.
+          # Developer task decomposition belongs in zed-env.toml schema 2.
           [scripts]
           test = "sh scripts/check.sh"
           EOF
