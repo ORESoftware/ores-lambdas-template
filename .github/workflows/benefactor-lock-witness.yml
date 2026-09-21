@@ -3,11 +3,12 @@ name: benefactor lock witness
 on:
   pull_request:
     paths:
-      - '.evidence/benefactor-lock/**'
+      - '.evidence/benefactor-lock/Cargo.toml'
+      - '.evidence/benefactor-lock/src/lib.rs'
       - '.github/workflows/benefactor-lock-witness.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
@@ -22,7 +23,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.EXPECTED_SHA }}
-          persist-credentials: false
+          persist-credentials: true
           show-progress: false
 
       - name: Verify exact reviewed source
@@ -44,6 +45,20 @@ jobs:
           cargo metadata --locked --manifest-path "${WITNESS_DIR}/Cargo.toml" --all-features --format-version 1 >/dev/null
           cp "${WITNESS_DIR}/Cargo.lock" "${RUNNER_TEMP}/Cargo.lock"
           sha256sum "${RUNNER_TEMP}/Cargo.lock" | tee "${RUNNER_TEMP}/Cargo.lock.sha256"
+
+      - name: Commit exact generated lock to witness branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add "${WITNESS_DIR}/Cargo.lock"
+          if git diff --cached --quiet; then
+            echo 'generated lock already matches branch evidence'
+            exit 0
+          fi
+          git commit -m 'test: retain generated Benefactor Cargo lock evidence'
+          git push origin "HEAD:${GITHUB_HEAD_REF}"
 
       - name: Retain generated lock evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
