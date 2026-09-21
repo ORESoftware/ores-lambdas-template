@@ -5,35 +5,46 @@ on:
     paths:
       - '.ores-lambda.toml'
       - '.ores-mw.toml'
+      - '.ores-otel.toml'
       - '.zpkg.toml'
       - 'Cargo.toml'
       - 'Cargo.lock'
+      - 'config/**'
       - 'contracts/**'
       - 'conformance/**'
       - 'src/**'
+      - 'scripts/check-fleet-repository.py'
       - '.github/workflows/fleet-manifest-conformance.yml'
   push:
     branches: [main]
     paths:
       - '.ores-lambda.toml'
       - '.ores-mw.toml'
+      - '.ores-otel.toml'
       - '.zpkg.toml'
       - 'Cargo.toml'
       - 'Cargo.lock'
+      - 'config/**'
       - 'contracts/**'
       - 'conformance/**'
       - 'src/**'
+      - 'scripts/check-fleet-repository.py'
       - '.github/workflows/fleet-manifest-conformance.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: fleet-manifest-conformance-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+  ORES_LAMBDA_AUTHORITY_SHA: cc7e5da3b42a75f8b172d85bf13a0c2844c2d431
 
 jobs:
-  repository-preflight:
+  repository-admission:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -48,32 +59,25 @@ jobs:
         shell: bash
         run: test "$(git rev-parse HEAD)" = "${EXPECTED_SHA}"
 
-      - name: Verify local fleet authority envelope
+      - name: Run pinned executable fleet admission mirror
         shell: bash
         run: |
           set -euo pipefail
-          for path in .ores-lambda.toml .ores-mw.toml .ores-otel.toml config/ores-middleware.stack.json; do
-            test -f "${path}"
-            test ! -L "${path}"
-          done
-          test "$(wc -c < .ores-lambda.toml)" -le 262144
-          grep -Eq '^schema_version = "ores\.lambda\.manifest/v1"$' .ores-lambda.toml
-          grep -Eq '^\[middleware\]$' .ores-lambda.toml
-          grep -Eq '^required = true$' .ores-lambda.toml
-          grep -Eq '^execution = "invocation"$' .ores-lambda.toml
-          grep -Eq '^fail_closed = true$' .ores-lambda.toml
-          grep -Eq '^middleware_required = true$' .ores-lambda.toml
-          grep -Eq '^ingress_path_prefix = "/__ores/lambda/[A-Za-z0-9._-]+"$' .ores-lambda.toml
+          python3 scripts/check-fleet-repository.py \
+            --root . \
+            --authority-sha "${ORES_LAMBDA_AUTHORITY_SHA}"
 
       - name: Verify repository structural lifecycle
         shell: bash
         run: sh conformance/check.sh --structural-only
 
-      - name: Explain central semantic admission
+      - name: Record bootstrap authority boundary
         shell: bash
         run: |
-          cat <<'EOF'
-          Local consumer CI intentionally does not clone the private ORESoftware/ores-lambda repository.
-          Exact semantic `ores-lambda check` / `check-repo` admission is run from the central authority
-          against this public consumer SHA, so no cross-repository read credential is required here.
+          set -euo pipefail
+          cat <<EOF
+          Canonical semantic authority: ORESoftware/ores-lambda@${ORES_LAMBDA_AUTHORITY_SHA}
+          Consumer-local executable mirror: scripts/check-fleet-repository.py
+          Mirror removal condition: consume the reviewed oresoftware/ores-lambda Zed package or an automatically triggered central-authority receipt.
+          The mirror additionally enforces the repo-owned Cargo-entrypoint rule tracked in ORESoftware/ores-lambda#9.
           EOF
