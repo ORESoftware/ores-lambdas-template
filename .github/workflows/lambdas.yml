@@ -142,10 +142,12 @@ jobs:
         run: sh scripts/test-entrypoint.sh
       - name: Verify formatting
         run: cargo fmt --all --check
+      - name: Verify committed dependency graph
+        run: cargo metadata --locked --all-features --format-version 1 >/dev/null
       - name: Test all supported adapters
-        run: cargo test --features http,portable,aws --all-targets
+        run: cargo test --locked --features http,portable,aws --all-targets
       - name: Lint all supported adapters
-        run: cargo clippy --features http,portable,aws --all-targets -- -D warnings
+        run: cargo clippy --locked --features http,portable,aws --all-targets -- -D warnings
 
   container-artifacts:
     name: OCI image ${{ matrix.arch }}
@@ -248,7 +250,7 @@ jobs:
           test -d "${extract}/lib"
           echo "${extract}" >> "${GITHUB_PATH}"
           "${extract}/zig" version | grep -Fx "${ZIG_VERSION}"
-      - name: Build AWS ZIP artifacts
+      - name: Build AWS ZIP artifacts from the committed graph
         shell: bash
         env:
           ARCH: ${{ matrix.arch }}
@@ -260,13 +262,68 @@ jobs:
             *) echo "unsupported architecture: ${ARCH}" >&2; exit 2 ;;
           esac
           cargo lambda build \
+            --locked \
             --release \
             "${architecture[@]}" \
             --features aws \
             --bin worker-aws \
             --bin health \
             --output-format zip
-      - name: Record source, architecture, runtime, and checksums
+      - name: Add immutable invocation policy to AWS ZIP artifacts
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          command -v zip >/dev/null
+          command -v unzip >/dev/null
+          for source in .ores-mw.toml .ores-otel.toml config/ores-middleware.stack.json; do
+            test -f "${source}"
+            test ! -L "${source}"
+          done
+          for binary in worker-aws health; do
+            archive="target/lambda/${binary}/bootstrap.zip"
+            archive_abs="$(realpath "${archive}")"
+            stage="${RUNNER_TEMP}/aws-policy-${ARCH}-${binary}"
+            rm -rf "${stage}"
+            mkdir -p "${stage}/config"
+            unzip -q "${archive}" -d "${stage}"
+            test -f "${stage}/bootstrap"
+            test ! -L "${stage}/bootstrap"
+            install -m 0444 .ores-mw.toml "${stage}/.ores-mw.toml"
+            install -m 0444 .ores-otel.toml "${stage}/.ores-otel.toml"
+            install -m 0444 config/ores-middleware.stack.json "${stage}/config/ores-middleware.stack.json"
+            chmod 0555 "${stage}/bootstrap" "${stage}/config"
+            rm -f "${archive}"
+            (
+              cd "${stage}"
+              zip -X -q "${archive_abs}" \
+                bootstrap \
+                .ores-mw.toml \
+                .ores-otel.toml \
+                config/ores-middleware.stack.json
+            )
+          done
+      - name: Verify AWS ZIP policy closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="$(printf '%s\n' \
+            .ores-mw.toml \
+            .ores-otel.toml \
+            bootstrap \
+            config/ores-middleware.stack.json | sort)"
+          for binary in worker-aws health; do
+            archive="target/lambda/${binary}/bootstrap.zip"
+            test -s "${archive}"
+            actual="$(unzip -Z1 "${archive}" | sed 's#^\./##' | sort)"
+            test "${actual}" = "${expected}"
+            unzip -p "${archive}" .ores-mw.toml | cmp - .ores-mw.toml
+            unzip -p "${archive}" .ores-otel.toml | cmp - .ores-otel.toml
+            unzip -p "${archive}" config/ores-middleware.stack.json | \
+              cmp - config/ores-middleware.stack.json
+          done
+      - name: Record source, architecture, runtime, policy, and checksums
         shell: bash
         env:
           ARCH: ${{ matrix.arch }}
@@ -274,35 +331,27 @@ jobs:
           set -euo pipefail
           manifest=target/lambda/manifest.jsonl
           : > "${manifest}"
+          policy_manifest_sha="$(sha256sum .ores-mw.toml | awk '{print $1}')"
+          policy_stack_sha="$(sha256sum config/ores-middleware.stack.json | awk '{print $1}')"
+          policy_otel_sha="$(sha256sum .ores-otel.toml | awk '{print $1}')"
           for binary in worker-aws health; do
             archive="target/lambda/${binary}/bootstrap.zip"
             test -s "${archive}"
-            ARCH="${ARCH}" \
-            BINARY="${binary}" \
-            ARCHIVE="${archive}" \
-            SOURCE_REVISION="${GITHUB_SHA}" \
-            RUST_TOOLCHAIN="$(rustc -V)" \
-            CARGO_LAMBDA="$(cargo lambda --version)" \
-              python3 - <<'PY' >> "${manifest}"
-          import hashlib
-          import json
-          import os
-          from pathlib import Path
-
-          archive = Path(os.environ["ARCHIVE"])
-          record = {
-              "adapter": "aws",
-              "architecture": os.environ["ARCH"],
-              "archive": archive.as_posix(),
-              "binary": os.environ["BINARY"],
-              "cargoLambda": os.environ["CARGO_LAMBDA"],
-              "runtime": "provided.al2023",
-              "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
-              "sourceRevision": os.environ["SOURCE_REVISION"],
-              "rustToolchain": os.environ["RUST_TOOLCHAIN"],
-          }
-          print(json.dumps(record, sort_keys=True, separators=(",", ":")))
-          PY
+            jq -cn \
+              --arg adapter aws \
+              --arg architecture "${ARCH}" \
+              --arg archive "${archive}" \
+              --arg binary "${binary}" \
+              --arg cargoLambda "$(cargo lambda --version)" \
+              --arg runtime provided.al2023 \
+              --arg sha256 "$(sha256sum "${archive}" | awk '{print $1}')" \
+              --arg sourceRevision "${GITHUB_SHA}" \
+              --arg rustToolchain "$(rustc -V)" \
+              --arg middlewareManifestSha256 "${policy_manifest_sha}" \
+              --arg middlewareStackSha256 "${policy_stack_sha}" \
+              --arg otelPolicySha256 "${policy_otel_sha}" \
+              '{adapter:$adapter,architecture:$architecture,archive:$archive,binary:$binary,cargoLambda:$cargoLambda,runtime:$runtime,sha256:$sha256,sourceRevision:$sourceRevision,rustToolchain:$rustToolchain,policy:{middlewareManifestSha256:$middlewareManifestSha256,middlewareStackSha256:$middlewareStackSha256,otelPolicySha256:$otelPolicySha256}}' \
+              >> "${manifest}"
           done
           test "$(wc -l < "${manifest}")" -eq 2
           sha256sum target/lambda/*/bootstrap.zip > target/lambda/SHA256SUMS
