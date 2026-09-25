@@ -66,7 +66,7 @@ jobs:
           rm -rf "$GITHUB_WORKSPACE/.ci"
 
       - name: Audit repository and root TOML contracts
-        run: oresc --no-json audit repo --path .
+        run: oresc --no-json audit repo
 
       - name: Audit environment declaration/reference coverage
-        run: oresc --no-json audit env --path .
+        run: oresc --no-json audit env
