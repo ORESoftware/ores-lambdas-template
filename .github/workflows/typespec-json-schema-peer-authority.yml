@@ -61,12 +61,23 @@ jobs:
           generated_schema: .typespec-json-schema-validator/generated/typespec.generated.schema.json
           expected_declarations: '["OreSchemaAuthority.AuthorityKind","OreSchemaAuthority.PeerAuthorityRegistration"]'
 
+      - name: Verify current Contract IR against both peer authorities
+        uses: ORESoftware/typespec-json-schema-validator/actions/verify-contract-ir@bd503465dab8c5148fee722b443ed04ff126c9bf
+        with:
+          contract_ir: .typespec-json-schema-validator/contract-ir.json
+          report: .typespec-json-schema-validator/report.json
+          typespec: test/fixtures/schema-authority-canary/main.tsp
+          schema: test/fixtures/schema-authority-canary/authored.schema.json
+          generated_schema: .typespec-json-schema-validator/generated/typespec.generated.schema.json
+          expected_declarations: '["OreSchemaAuthority.AuthorityKind","OreSchemaAuthority.PeerAuthorityRegistration"]'
+
       - name: Verify authored authorities were not modified
         shell: bash
         run: git diff --exit-code -- test/fixtures/schema-authority-canary/
 
       - name: Retain diagnostic receipt, IR and comparison witness
         if: ${{ always() }}
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: schema-peer-authority-${{ github.event.repository.name }}-${{ github.run_id }}
