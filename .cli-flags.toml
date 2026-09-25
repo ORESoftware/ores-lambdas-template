@@ -2,6 +2,9 @@
 [help]
 url = "https://github.com/__ORG__/__PREFIX__-lambdas"
 
+[parse]
+allow_unknown = false
+
 [flags.port]
 type = "integer"
 env = "PORT"
