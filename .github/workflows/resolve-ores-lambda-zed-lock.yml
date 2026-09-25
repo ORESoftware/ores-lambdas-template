@@ -1,0 +1,143 @@
+name: temporary ores-lambda Zed lock resolver
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/resolve-ores-lambda-zed-lock.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ores-lambda-zed-lock-resolver-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  ZED_CLI_REVISION: c7533b0e79e083516cef46467defa8ded70886fb
+  ORES_LAMBDA_ZPKG_BLOB_SHA: 25f9025c21a91708b50c00c3a750e70afefec80c
+
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out resolver host
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Materialize exact ores-lambda package descriptor
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="${RUNNER_TEMP}/ores-lambda-lock-root"
+          rm -rf "${root}"
+          mkdir -p "${root}/contracts" "${root}/conformance" "${root}/scripts"
+          cat > "${root}/.zpkg.toml" <<'EOF'
+          [package]
+          org = "oresoftware"
+          name = "ores-lambda"
+          version = "0.1.0"
+          description = "Provider-neutral Lambda ingress, routing, SDK, contracts, and conformance authority"
+          license = "MIT"
+          keywords = ["lambda", "rust", "serverless", "contracts", "conformance", "ingress"]
+          language = "rust"
+
+          [package.repository]
+          vcs = "git"
+          url = "https://github.com/ORESoftware/ores-lambda"
+
+          [dependencies]
+          "oresoftware/typespec-json-schema-validator" = "^0.1.0"
+
+          [install]
+          dir = ".vendor/.zed"
+
+          [targets.rust]
+          dir = "."
+          name = "ores-lambda"
+          adapter = "rust"
+
+          # Publish the authored contract authorities independently so non-Rust consumers
+          # can depend on the wire contract without copying the Rust workspace.
+          [targets.contracts]
+          dir = "contracts"
+          name = "ores-lambda-contracts"
+          adapter = "none"
+
+          # Publish the executable fixture/vector corpus independently so every runtime
+          # can prove behavior against the same reviewed cases.
+          [targets.conformance]
+          dir = "conformance"
+          name = "ores-lambda-conformance"
+          adapter = "none"
+
+          [publish]
+          include_readme = true
+          tag_format = "v{version}"
+          smoke_test = "sh \"$ZED_PKG_TEST_TARGET/scripts/check-package.sh\""
+          exclude = [
+            ".env",
+            ".env.*",
+            ".direnv/**",
+            ".conformance/**",
+            ".vendor/.zed/**",
+            ".zed-pack/**",
+            "target/**",
+            "**/target/**",
+            "tmp/**",
+            "**/*.log",
+            ".DS_Store",
+          ]
+
+          # Current zed-pkg manifests expose only the package-level test lifecycle.
+          # Developer task decomposition belongs in zed-env.toml schema 2.
+          [scripts]
+          test = "sh scripts/check.sh"
+          EOF
+          printf '%s\n' '# placeholder only; resolver never packs or executes this sandbox' > "${root}/Cargo.toml"
+          printf '%s\n' '#!/usr/bin/env sh' 'exit 0' > "${root}/scripts/check.sh"
+          printf '%s\n' '#!/usr/bin/env sh' 'exit 0' > "${root}/scripts/check-package.sh"
+          chmod 0555 "${root}/scripts/check.sh" "${root}/scripts/check-package.sh"
+
+          actual_blob="$({ printf 'blob %s\0' "$(wc -c < "${root}/.zpkg.toml")"; cat "${root}/.zpkg.toml"; } | sha1sum | awk '{print $1}')"
+          test "${actual_blob}" = "${ORES_LAMBDA_ZPKG_BLOB_SHA}"
+          printf 'LOCK_ROOT=%s\n' "${root}" >> "${GITHUB_ENV}"
+
+      - name: Install Rust 1.88
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: "1.88.0"
+
+      - name: Install pinned Zed resolver
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo install \
+            --git https://github.com/zed-pkg/zed-cli \
+            --rev "$ZED_CLI_REVISION" \
+            --locked zed-cli
+          test "$(zed --version | awk '{print $2}')" = "0.3.0"
+
+      - name: Generate frozen dependency lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${LOCK_ROOT}"
+          zed install
+          test -s .zpkg.lock
+          zed validate --manifest .zpkg.toml --lock .zpkg.lock --require-lock
+          zed install --frozen
+          cp .zpkg.lock "${RUNNER_TEMP}/ores-lambda.zpkg.lock"
+          sha256sum .zpkg.lock > "${RUNNER_TEMP}/ores-lambda.zpkg.lock.sha256"
+
+      - name: Retain resolver-owned lock evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ores-lambda-zed-lock-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/ores-lambda.zpkg.lock
+            ${{ runner.temp }}/ores-lambda.zpkg.lock.sha256
+          if-no-files-found: error
+          retention-days: 7
