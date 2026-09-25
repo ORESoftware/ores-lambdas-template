@@ -121,6 +121,7 @@ jobs:
           schema: schema-authority/authored.schema.json
           generated_schema: .typespec-json-schema-validator/generated/typespec.generated.schema.json
           expected_declarations: '["Ores.LambdaRuntime.Operation","Ores.LambdaRuntime.Provider"]'
+          verification: .typespec-json-schema-validator/contract-ir-verification.json
 
       - name: Retain contract evidence
         if: always()
