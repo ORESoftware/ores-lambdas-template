@@ -62,7 +62,10 @@ jobs:
           cargo +"$RUST_TOOLCHAIN" build --locked --manifest-path "$tool/Cargo.toml" --bin oresc
           install -d "$RUNNER_TEMP/oresc-bin"
           install -m 0755 "$CARGO_TARGET_DIR/debug/oresc" "$RUNNER_TEMP/oresc-bin/oresc"
+          install -m 0644 "$tool/.cli-flags.toml" "$RUNNER_TEMP/oresc-bin/.cli-flags.toml"
           echo "$RUNNER_TEMP/oresc-bin" >> "$GITHUB_PATH"
+          echo "FLAGS2ENV_CONFIG=$RUNNER_TEMP/oresc-bin/.cli-flags.toml" >> "$GITHUB_ENV"
+          echo "FLAGS2ENV_DOTENV=0" >> "$GITHUB_ENV"
           rm -rf "$GITHUB_WORKSPACE/.ci"
 
       - name: Audit repository and root TOML contracts
