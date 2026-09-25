@@ -4,6 +4,9 @@ url = "https://github.com/__ORG__/__PREFIX__-lambdas"
 
 [parse]
 allow_unknown = false
+positionals_env = "ORES_LAMBDAS_POSITIONALS"
+unknown_options_env = "ORES_LAMBDAS_UNKNOWN_OPTIONS"
+errors_env = "ORES_LAMBDAS_PARSE_ERRORS"
 
 [flags.port]
 type = "integer"
