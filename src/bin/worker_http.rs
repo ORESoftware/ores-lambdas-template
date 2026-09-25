@@ -13,6 +13,9 @@ use __CRATE__::adapters::http::{detect_provider, router, HttpConfig};
 
 const CONTRACT_FILE: &str = ".cli-flags.toml";
 const CONTRACT_OVERRIDE_ENV: &str = "ORES_LAMBDAS_FLAGS_CONFIG";
+const POSITIONALS_ENV: &str = "ORES_LAMBDAS_POSITIONALS";
+const UNKNOWN_OPTIONS_ENV: &str = "ORES_LAMBDAS_UNKNOWN_OPTIONS";
+const PARSE_ERRORS_ENV: &str = "ORES_LAMBDAS_PARSE_ERRORS";
 const INSTALL_SHARE_DIR: &str = "ores-lambdas";
 const MIDDLEWARE_STACK_CONFIG: &str = "config/ores-middleware.stack.json";
 const MIDDLEWARE_TARGET: &str = "portable-adapters";
@@ -54,22 +57,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     parser
         .audit_config(Some(contract))
         .map_err(|_| invalid_input("reviewed flags2env contract audit failed"))?;
-    let argv: Vec<String> = std::env::args().collect();
+
+    // Let flags2env read the process command line itself. Once this repository
+    // adopts flags2env, application code must not retain a second argv parser.
+    // The contract exposes only bounded JSON diagnostic channels; inspect the
+    // parser-produced map before ambient environment values are merged so a
+    // pre-existing environment variable cannot spoof an empty diagnostic.
     let parsed = parser
-        .parse_structured(&argv, Some(contract))
-        .map_err(|_| invalid_input("flags2env parsing failed"))?;
-    if !parsed.unknown_options.is_empty() || !parsed.errors.is_empty() || !parsed.extras.is_empty()
-    {
+        .parse_process(Some(contract))
+        .map_err(|_| invalid_input("flags2env process parsing failed"))?;
+    let unknown_count = diagnostic_count(&parsed, UNKNOWN_OPTIONS_ENV)?;
+    let parse_error_count = diagnostic_count(&parsed, PARSE_ERRORS_ENV)?;
+    let positional_count = diagnostic_count(&parsed, POSITIONALS_ENV)?;
+    if unknown_count != 0 || parse_error_count != 0 || positional_count != 0 {
         return Err(invalid_input(format!(
-            "invalid arguments: {} unknown option(s), {} parse error(s), {} positional extra(s)",
-            parsed.unknown_options.len(),
-            parsed.errors.len(),
-            parsed.extras.len()
+            "invalid arguments: {unknown_count} unknown option(s), {parse_error_count} parse error(s), {positional_count} positional extra(s)"
         ))
         .into());
     }
+
+    // Keep provider discovery over the complete process environment while the
+    // declared CLI/env keys are resolved by flags2env and override that ambient
+    // snapshot according to the reviewed contract's precedence rules.
     let mut values: HashMap<String, String> = std::env::vars().collect();
-    values.extend(parsed.provided_flags);
+    values.extend(parsed);
     let config: Config = parser
         .coerce(&values, Some(contract))
         .map_err(|_| invalid_input("flags2env typed coercion failed"))?;
@@ -110,6 +121,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     })
     .await?;
     Ok(())
+}
+
+fn diagnostic_count(values: &HashMap<String, String>, key: &str) -> Result<usize, io::Error> {
+    let Some(raw) = values.get(key) else {
+        return Ok(0);
+    };
+    let entries: Vec<serde_json::Value> = serde_json::from_str(raw)
+        .map_err(|_| invalid_input(format!("flags2env diagnostic channel {key} is invalid")))?;
+    Ok(entries.len())
 }
 
 fn resolve_contract_path() -> Result<PathBuf, io::Error> {
