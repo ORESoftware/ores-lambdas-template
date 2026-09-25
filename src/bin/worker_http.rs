@@ -5,12 +5,18 @@ use flags2env::BundledFlags2Env;
 use ores_middleware::{admit_server_stack_from_env, frameworks::axum::install_from_env};
 use std::{
     collections::HashMap,
-    fs,
+    fs, io,
     net::{IpAddr, SocketAddr},
+    path::PathBuf,
 };
 use __CRATE__::adapters::http::{detect_provider, router, HttpConfig};
 
-const CONTRACT: &str = ".cli-flags.toml";
+const CONTRACT_FILE: &str = ".cli-flags.toml";
+const CONTRACT_OVERRIDE_ENV: &str = "ORES_LAMBDAS_FLAGS_CONFIG";
+const POSITIONALS_ENV: &str = "ORES_LAMBDAS_POSITIONALS";
+const UNKNOWN_OPTIONS_ENV: &str = "ORES_LAMBDAS_UNKNOWN_OPTIONS";
+const PARSE_ERRORS_ENV: &str = "ORES_LAMBDAS_PARSE_ERRORS";
+const INSTALL_SHARE_DIR: &str = "ores-lambdas";
 const MIDDLEWARE_STACK_CONFIG: &str = "config/ores-middleware.stack.json";
 const MIDDLEWARE_TARGET: &str = "portable-adapters";
 
@@ -25,6 +31,14 @@ struct Config {
 }
 
 fn admit_middleware_boundary() -> Result<(), Box<dyn std::error::Error>> {
+    let middleware_manifest = ".ores-mw.toml";
+    let manifest_metadata = fs::symlink_metadata(middleware_manifest)?;
+    if manifest_metadata.file_type().is_symlink() || !manifest_metadata.is_file() {
+        return Err(format!(
+            "middleware manifest must be a regular non-symlink file: {middleware_manifest}"
+        )
+        .into());
+    }
     let manifest_path =
         admit_server_stack_from_env(Some(MIDDLEWARE_TARGET), MIDDLEWARE_STACK_CONFIG)?;
     let metadata = fs::symlink_metadata(MIDDLEWARE_STACK_CONFIG)?;
@@ -44,20 +58,40 @@ fn admit_middleware_boundary() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let parser = BundledFlags2Env::new();
-    parser.audit_config(Some(CONTRACT))?;
-    let argv: Vec<String> = std::env::args().collect();
-    let parsed = parser.parse_structured(&argv, Some(CONTRACT))?;
-    if !parsed.unknown_options.is_empty() || !parsed.errors.is_empty() {
-        return Err(format!(
-            "invalid arguments: {} unknown option(s), {} parse error(s)",
-            parsed.unknown_options.len(),
-            parsed.errors.len()
-        )
+    let contract = resolve_contract_path()?;
+    let contract = contract
+        .to_str()
+        .ok_or_else(|| invalid_input("reviewed flags2env contract path is not valid UTF-8"))?;
+    parser
+        .audit_config(Some(contract))
+        .map_err(|_| invalid_input("reviewed flags2env contract audit failed"))?;
+
+    // Let flags2env read the process command line itself. Once this repository
+    // adopts flags2env, application code must not retain a second argv parser.
+    // The contract exposes only bounded JSON diagnostic channels; inspect the
+    // parser-produced map before ambient environment values are merged so a
+    // pre-existing environment variable cannot spoof an empty diagnostic.
+    let parsed = parser
+        .parse_process(Some(contract))
+        .map_err(|_| invalid_input("flags2env process parsing failed"))?;
+    let unknown_count = diagnostic_count(&parsed, UNKNOWN_OPTIONS_ENV)?;
+    let parse_error_count = diagnostic_count(&parsed, PARSE_ERRORS_ENV)?;
+    let positional_count = diagnostic_count(&parsed, POSITIONALS_ENV)?;
+    if unknown_count != 0 || parse_error_count != 0 || positional_count != 0 {
+        return Err(invalid_input(format!(
+            "invalid arguments: {unknown_count} unknown option(s), {parse_error_count} parse error(s), {positional_count} positional extra(s)"
+        ))
         .into());
     }
+
+    // Keep provider discovery over the complete process environment while the
+    // declared CLI/env keys are resolved by flags2env and override that ambient
+    // snapshot according to the reviewed contract's precedence rules.
     let mut values: HashMap<String, String> = std::env::vars().collect();
-    values.extend(parsed.provided_flags);
-    let config: Config = parser.coerce(&values, Some(CONTRACT))?;
+    values.extend(parsed);
+    let config: Config = parser
+        .coerce(&values, Some(contract))
+        .map_err(|_| invalid_input("flags2env typed coercion failed"))?;
 
     // The Lambda fleet contract requires middleware at the invocation boundary.
     // Admit the repository-owned .ores-mw.toml and its stack path before the
@@ -95,4 +129,78 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     })
     .await?;
     Ok(())
+}
+
+fn diagnostic_count(values: &HashMap<String, String>, key: &str) -> Result<usize, io::Error> {
+    let Some(raw) = values.get(key) else {
+        return Ok(0);
+    };
+    let entries: Vec<serde_json::Value> = serde_json::from_str(raw)
+        .map_err(|_| invalid_input(format!("flags2env diagnostic channel {key} is invalid")))?;
+
+    // flags2env's process-level API reads the host process argv verbatim, so
+    // argv[0] is currently surfaced through the positional diagnostic channel.
+    // Treat exactly that executable identity as parser metadata, not as a user
+    // positional. A second identical token (or any other token) remains a real
+    // positional extra and therefore still fails closed.
+    if key == POSITIONALS_ENV {
+        if let (Some(serde_json::Value::String(first)), Ok(executable)) =
+            (entries.first(), std::env::current_exe())
+        {
+            if first == &executable.to_string_lossy() {
+                return Ok(entries.len().saturating_sub(1));
+            }
+        }
+    }
+
+    Ok(entries.len())
+}
+
+fn resolve_contract_path() -> Result<PathBuf, io::Error> {
+    if let Some(explicit) =
+        std::env::var_os(CONTRACT_OVERRIDE_ENV).filter(|value| !value.is_empty())
+    {
+        let path = PathBuf::from(explicit);
+        if !path.is_absolute() {
+            return Err(invalid_input(format!(
+                "{CONTRACT_OVERRIDE_ENV} must be an absolute path"
+            )));
+        }
+        if !path.is_file() {
+            return Err(invalid_input(format!(
+                "{CONTRACT_OVERRIDE_ENV} does not name a readable regular file"
+            )));
+        }
+        return path
+            .canonicalize()
+            .map_err(|_| invalid_input(format!("cannot resolve {CONTRACT_OVERRIDE_ENV}")));
+    }
+
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(bin_dir) = executable.parent() {
+            for candidate in [
+                bin_dir
+                    .join("..")
+                    .join("share")
+                    .join(INSTALL_SHARE_DIR)
+                    .join(CONTRACT_FILE),
+                bin_dir.join(CONTRACT_FILE),
+            ] {
+                if candidate.is_file() {
+                    return Ok(candidate);
+                }
+            }
+        }
+    }
+
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(CONTRACT_FILE);
+    if source.is_file() {
+        return Ok(source);
+    }
+
+    Err(invalid_input("reviewed flags2env contract is unavailable"))
+}
+
+fn invalid_input(message: impl Into<String>) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, message.into())
 }

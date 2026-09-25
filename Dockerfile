@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # One multi-stage definition produces Docker-compatible images or OCI layouts.
 # BUILDPLATFORM/TARGETPLATFORM are BuildKit automatic global args; do not redeclare them empty.
-FROM --platform=$BUILDPLATFORM rust:1.88-bookworm AS builder
+FROM --platform=$BUILDPLATFORM rust:1.88-bookworm@sha256:af306cfa71d987911a781c37b59d7d67d934f49684058f96cf72079c3626bfe0 AS builder
 ARG TARGETARCH
 ARG BINARY=worker-http
 ARG CARGO_FEATURES=http
@@ -29,7 +29,7 @@ RUN set -eux; \
     fi; \
     install -Dm755 "target/$target/release/$BINARY" /out/lambda
 
-FROM --platform=$TARGETPLATFORM debian:bookworm-slim AS runtime
+FROM --platform=$TARGETPLATFORM debian:bookworm-slim@sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818 AS runtime
 ARG SOURCE_REPOSITORY=https://github.com/ORESoftware/ores-lambdas-template
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.source="$SOURCE_REPOSITORY" \
@@ -43,26 +43,27 @@ RUN apt-get update \
     && useradd --system --gid lambda --home-dir /nonexistent --no-create-home lambda
 COPY --from=builder /out/lambda /usr/local/bin/lambda
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY --chmod=0444 .cli-flags.toml /usr/local/share/ores-lambdas/.cli-flags.toml
 WORKDIR /app
 # Runtime policy must travel with the binary. The worker fails closed if the
 # middleware manifest or selected stack is missing, so keep the full admitted
 # policy envelope at stable, read-only paths inside every OCI image.
-COPY --chmod=0444 .cli-flags.toml /app/.cli-flags.toml
 COPY --chmod=0444 .ores-mw.toml /app/.ores-mw.toml
 COPY --chmod=0444 .ores-otel.toml /app/.ores-otel.toml
 COPY --chmod=0444 config/ores-middleware.stack.json /app/config/ores-middleware.stack.json
-RUN chmod 0555 /usr/local/bin/lambda /usr/local/bin/entrypoint.sh /app /app/config \
+RUN chmod 0555 /usr/local/bin/lambda /usr/local/bin/entrypoint.sh /usr/local/share/ores-lambdas /app /app/config \
     && test -r /app/.ores-mw.toml \
     && test -r /app/.ores-otel.toml \
     && test -r /app/config/ores-middleware.stack.json \
     && test "$(stat -c '%a' /app)" = 555 \
     && test "$(stat -c '%a' /app/config)" = 555 \
-    && test "$(stat -c '%a' /app/.cli-flags.toml)" = 444 \
+    && test "$(stat -c '%a' /usr/local/share/ores-lambdas/.cli-flags.toml)" = 444 \
     && test "$(stat -c '%a' /app/.ores-mw.toml)" = 444 \
     && test "$(stat -c '%a' /app/.ores-otel.toml)" = 444 \
     && test "$(stat -c '%a' /app/config/ores-middleware.stack.json)" = 444
 USER lambda
-ENV PORT=8080 \
+ENV ORES_LAMBDAS_FLAGS_CONFIG=/usr/local/share/ores-lambdas/.cli-flags.toml \
+    PORT=8080 \
     LAMBDA_SIDECAR_MODE=combined \
     LAMBDA_SIDECAR_FAIL_MODE=open
 EXPOSE 8080

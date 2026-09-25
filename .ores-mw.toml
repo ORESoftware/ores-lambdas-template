@@ -5,6 +5,11 @@ schema_version = 1
 repository_mode = "server-only"
 default_target = "portable-adapters"
 
+[flags2env]
+contract = ".cli-flags.toml"
+require_audit = true
+precedence = "argv-over-env"
+
 [[targets]]
 name = "portable-adapters"
 role = "server"
