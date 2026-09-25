@@ -112,7 +112,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-
 fn resolve_contract_path() -> Result<PathBuf, io::Error> {
     if let Some(explicit) =
         std::env::var_os(CONTRACT_OVERRIDE_ENV).filter(|value| !value.is_empty())
