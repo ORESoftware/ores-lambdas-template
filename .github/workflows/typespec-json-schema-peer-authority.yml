@@ -70,6 +70,7 @@ jobs:
           schema: test/fixtures/schema-authority-canary/authored.schema.json
           generated_schema: .typespec-json-schema-validator/generated/typespec.generated.schema.json
           expected_declarations: '["OreSchemaAuthority.AuthorityKind","OreSchemaAuthority.PeerAuthorityRegistration"]'
+          verification: .typespec-json-schema-validator/contract-ir-verification.json
 
       - name: Verify authored authorities were not modified
         shell: bash
