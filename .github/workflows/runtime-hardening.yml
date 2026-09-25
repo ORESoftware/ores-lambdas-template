@@ -131,7 +131,7 @@ jobs:
               test -x /app
               test -x /app/config
               for path in \
-                /app/.cli-flags.toml \
+                /usr/local/share/ores-lambdas/.cli-flags.toml \
                 /app/.ores-mw.toml \
                 /app/.ores-otel.toml \
                 /app/config/ores-middleware.stack.json
