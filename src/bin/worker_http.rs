@@ -137,6 +137,22 @@ fn diagnostic_count(values: &HashMap<String, String>, key: &str) -> Result<usize
     };
     let entries: Vec<serde_json::Value> = serde_json::from_str(raw)
         .map_err(|_| invalid_input(format!("flags2env diagnostic channel {key} is invalid")))?;
+
+    // flags2env's process-level API reads the host process argv verbatim, so
+    // argv[0] is currently surfaced through the positional diagnostic channel.
+    // Treat exactly that executable identity as parser metadata, not as a user
+    // positional. A second identical token (or any other token) remains a real
+    // positional extra and therefore still fails closed.
+    if key == POSITIONALS_ENV {
+        if let (Some(serde_json::Value::String(first)), Ok(executable)) =
+            (entries.first(), std::env::current_exe())
+        {
+            if first == &executable.to_string_lossy() {
+                return Ok(entries.len().saturating_sub(1));
+            }
+        }
+    }
+
     Ok(entries.len())
 }
 
