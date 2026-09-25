@@ -24,3 +24,45 @@ type = "string"
 env = "LAMBDAS_BIND"
 default = "0.0.0.0"
 help = "Bind address."
+
+[flags.otel_service_name]
+type = "string"
+env = "ORES_OTEL_SERVICE_NAME"
+aliases = ["otel-service-name"]
+help = "OpenTelemetry service name; credentials remain environment-only."
+
+[flags.rust_log]
+type = "string"
+env = "RUST_LOG"
+aliases = ["rust-log", "log-filter"]
+help = "Structured logging filter."
+
+[flags.otel_sample_ratio]
+type = "double"
+env = "ORES_OTEL_SAMPLE_RATIO"
+aliases = ["otel-sample-ratio"]
+help = "OpenTelemetry trace sampling ratio."
+
+[flags.otel_trace_context]
+type = "bool"
+env = "ORES_OTEL_TRACE_CONTEXT"
+aliases = ["otel-trace-context"]
+help = "Include trace/span correlation fields in structured logs."
+
+[flags.otlp_endpoint]
+type = "string"
+env = "OTEL_EXPORTER_OTLP_ENDPOINT"
+aliases = ["otlp-endpoint"]
+help = "OTLP exporter endpoint without credentials."
+
+[flags.otel_batch_max_queue]
+type = "integer"
+env = "ORES_OTEL_BATCH_MAX_QUEUE"
+aliases = ["otel-batch-max-queue"]
+help = "Maximum queued telemetry records before backpressure applies."
+
+[flags.otel_redact_fields]
+type = "json"
+env = "ORES_OTEL_REDACT_FIELDS"
+aliases = ["otel-redact-fields"]
+help = "JSON array of field names redacted before telemetry export."
