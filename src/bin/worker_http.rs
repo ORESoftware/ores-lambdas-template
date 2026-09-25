@@ -31,6 +31,14 @@ struct Config {
 }
 
 fn admit_middleware_boundary() -> Result<(), Box<dyn std::error::Error>> {
+    let middleware_manifest = ".ores-mw.toml";
+    let manifest_metadata = fs::symlink_metadata(middleware_manifest)?;
+    if manifest_metadata.file_type().is_symlink() || !manifest_metadata.is_file() {
+        return Err(format!(
+            "middleware manifest must be a regular non-symlink file: {middleware_manifest}"
+        )
+        .into());
+    }
     let manifest_path =
         admit_server_stack_from_env(Some(MIDDLEWARE_TARGET), MIDDLEWARE_STACK_CONFIG)?;
     let metadata = fs::symlink_metadata(MIDDLEWARE_STACK_CONFIG)?;
