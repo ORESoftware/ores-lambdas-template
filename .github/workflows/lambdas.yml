@@ -110,13 +110,26 @@ jobs:
           typespec: schema-authority/main.tsp
           schema: schema-authority/authored.schema.json
           report: .typespec-json-schema-validator/report.json
+          contract_ir: .typespec-json-schema-validator/contract-ir.json
           output_dir: .typespec-json-schema-validator/generated
+      - name: Verify current Contract IR against both authorities
+        uses: ORESoftware/typespec-json-schema-validator/actions/verify-contract-ir@bd503465dab8c5148fee722b443ed04ff126c9bf
+        with:
+          contract_ir: .typespec-json-schema-validator/contract-ir.json
+          report: .typespec-json-schema-validator/report.json
+          typespec: schema-authority/main.tsp
+          schema: schema-authority/authored.schema.json
+          generated_schema: .typespec-json-schema-validator/generated/typespec.generated.schema.json
+          expected_declarations: '["Ores.LambdaRuntime.Operation","Ores.LambdaRuntime.Provider"]'
+
       - name: Retain contract evidence
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: lambda-contract-parity-${{ github.run_id }}
           path: .typespec-json-schema-validator/
+          include-hidden-files: true
           if-no-files-found: warn
           retention-days: 30
 
