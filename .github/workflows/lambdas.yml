@@ -49,6 +49,10 @@ jobs:
                   raise SystemExit(f'root TOML exceeds 2 MiB: {path.name}')
               documents[path.name] = tomllib.loads(path.read_text(encoding='utf-8'))
 
+          standards = documents.get('.ores-standards.toml')
+          if not isinstance(standards, dict) or standards.get('version') != 1:
+              raise SystemExit('.ores-standards.toml must be admitted as version 1')
+
           otel = documents.get('.ores-otel.toml')
           if not isinstance(otel, dict):
               raise SystemExit('missing .ores-otel.toml')
