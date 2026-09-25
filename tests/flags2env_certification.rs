@@ -14,9 +14,17 @@ fn worker_uses_executable_owned_policy_and_absolute_override() {
 #[test]
 fn diagnostics_are_value_safe_and_positionals_fail_closed() {
     assert!(CONTRACT.contains("allow_unknown = false"));
-    assert!(WORKER.contains("parsed.extras.len()"));
+    assert!(CONTRACT.contains("positionals_env = \"ORES_LAMBDAS_POSITIONALS\""));
+    assert!(CONTRACT.contains("unknown_options_env = \"ORES_LAMBDAS_UNKNOWN_OPTIONS\""));
+    assert!(CONTRACT.contains("errors_env = \"ORES_LAMBDAS_PARSE_ERRORS\""));
+    assert!(WORKER.contains(".parse_process(Some(contract))"));
+    assert!(WORKER.contains("diagnostic_count(&parsed, POSITIONALS_ENV)"));
+    assert!(WORKER.contains("diagnostic_count(&parsed, UNKNOWN_OPTIONS_ENV)"));
+    assert!(WORKER.contains("diagnostic_count(&parsed, PARSE_ERRORS_ENV)"));
+    assert!(!WORKER.contains("std::env::args()"));
+    assert!(!WORKER.contains("std::env::args_os()"));
     assert!(WORKER.contains("reviewed flags2env contract audit failed"));
-    assert!(WORKER.contains("flags2env parsing failed"));
+    assert!(WORKER.contains("flags2env process parsing failed"));
     assert!(WORKER.contains("flags2env typed coercion failed"));
     assert!(!WORKER.contains("{error}"));
 }
