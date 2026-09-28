@@ -32,60 +32,11 @@ jobs:
           persist-credentials: false
           show-progress: false
 
-      - name: Parse root TOML and verify the always-on OTEL envelope
+      - name: Validate the owner-authoritative OTEL policy and secret boundary
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          import tomllib
-
-          root = Path('.').resolve()
-          documents = {}
-          for path in sorted(root.glob('*.toml')):
-              if path.is_symlink():
-                  raise SystemExit(f'root TOML must not be a symlink: {path.name}')
-              if path.stat().st_size > 2 * 1024 * 1024:
-                  raise SystemExit(f'root TOML exceeds 2 MiB: {path.name}')
-              documents[path.name] = tomllib.loads(path.read_text(encoding='utf-8'))
-
-          standards = documents.get('.ores-standards.toml')
-          if not isinstance(standards, dict) or standards.get('version') != 1:
-              raise SystemExit('.ores-standards.toml must be admitted as version 1')
-
-          otel = documents.get('.ores-otel.toml')
-          if not isinstance(otel, dict):
-              raise SystemExit('missing .ores-otel.toml')
-          if otel.get('version') != 1 or otel.get('mode') != 'server' or otel.get('strict') is not True:
-              raise SystemExit('.ores-otel.toml must be strict server-mode version 1')
-
-          flags = otel.get('flags2env')
-          expected = {
-              'contract': '.cli-flags.toml',
-              'require_audit': True,
-              'precedence': 'argv-over-env',
-          }
-          if flags != expected:
-              raise SystemExit('.ores-otel.toml flags2env envelope is not canonical')
-
-          names = set()
-          keys = set()
-          for binding in otel.get('env', []):
-              name = binding.get('name')
-              key = binding.get('key')
-              if not isinstance(name, str) or not isinstance(key, str):
-                  raise SystemExit('.ores-otel.toml env bindings require names and keys')
-              if name in names or key in keys:
-                  raise SystemExit('.ores-otel.toml env bindings must be unique')
-              names.add(name)
-              keys.add(key)
-              if binding.get('secret') is True and ('default' in binding or 'default_value' in binding):
-                  raise SystemExit('secret OTEL bindings may not contain plaintext defaults')
-
-          headers = next((item for item in otel.get('env', []) if item.get('key') == 'OTEL_EXPORTER_OTLP_HEADERS'), None)
-          if not headers or headers.get('secret') is not True:
-              raise SystemExit('OTLP headers must remain an environment-only secret binding')
-          PY
+          python3 scripts/test_ores_otel_runtime_config.py
 
       - name: Verify ores-sops plaintext boundary
         shell: bash
