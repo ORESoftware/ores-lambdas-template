@@ -72,7 +72,7 @@ jobs:
           PY
 
       - name: Admit root config against owner TypeSpec and JSON Schema
-        uses: ORESoftware/typespec-json-schema-validator@93dd73cb246a09b0a1c62d7192cc62ca6ecbe405
+        uses: ORESoftware/typespec-json-schema-validator@adda78a7aaf298b47d3bb48449af2070cb0ce1e7
         with:
           typespec: test/fixtures/ores-otel-config-v1/main.tsp
           schema: test/fixtures/ores-otel-config-v1/authored.schema.json
