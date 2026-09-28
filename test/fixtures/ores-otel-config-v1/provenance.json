@@ -1,0 +1,13 @@
+{
+  "repository": "ores-otel/ores-otel-interfaces",
+  "revision": "7c806d93f10e8874ebf6690d8a163f93eb851559",
+  "typespec": {
+    "path": "contracts/ores-otel-config.v1/main.tsp",
+    "gitBlob": "d768db5e49e9ab12d00e3863d17a21847c0bddb3"
+  },
+  "jsonSchema": {
+    "path": "contracts/ores-otel-config.v1/authored.schema.json",
+    "gitBlob": "66ad193539413e93fbe726b02a71a3c03e7399a3"
+  },
+  "role": "immutable consumer-test evidence; owner repository remains authoritative"
+}
