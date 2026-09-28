@@ -5,7 +5,7 @@ This template is a provider-neutral function shell. Generated repositories shoul
 ## Always-on repository contracts
 
 - `.cli-flags.toml` is the sole argv/alias/type/default command-line contract and is consumed through the official `flags-2-env` binding.
-- `.ores-otel.toml` is the repository-level observability policy. Its cross-runtime contract is owned by `ores-otel/ores-interfaces`; exporter credentials are environment-only and never receive plaintext defaults.
+- `.ores-otel.toml` is the repository-level observability policy. Its cross-runtime contract is owned by `ores-otel/ores-otel-interfaces` `OresOtelConfigV1`; the root TOML uses that owner shape directly. Non-secret argv/environment aliases remain in `.cli-flags.toml`, while `OTEL_EXPORTER_OTLP_HEADERS` is environment-only and never receives a plaintext default or public flag.
 - `schema-authority/main.tsp` and `schema-authority/authored.schema.json` remain independent peer authorities. `ORESoftware/typespec-json-schema-validator` (TJSV) must admit them at an immutable reviewed revision.
 - `.zpkg.toml` describes zed-pkg package/build/test metadata and must stay semantically aligned with `Cargo.toml`, bins, features, and the real CI commands.
 - `ORESoftware/ores-sops` owns Git-at-rest dotenv conventions. Plaintext is local-only under `env/dec/`; Git may contain only approved `env/enc/*.env.enc` ciphertext paths. Do not decrypt in `docker build`, upload decrypted values as artifacts, or copy them into root TOMLs.
@@ -56,7 +56,7 @@ The normal Shared Auth selector writes `.shared-auth.toml`. `shared-auth-compat`
 A generated lambda must not add a second argv parser inside any concern. Startup order is:
 
 1. audit and parse `.cli-flags.toml` with `flags-2-env`;
-2. merge approved CLI overrides into an immutable environment map;
+2. merge approved non-secret CLI overrides into an immutable environment map; credential-bearing OTLP headers remain environment-only;
 3. parse and independently validate each enabled concern TOML with its owning package/peer-authority contract;
 4. resolve symbolic environment-key bindings without printing values;
 5. initialize only the capabilities needed by the selected function binary.
