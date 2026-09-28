@@ -5,12 +5,14 @@ on:
     paths:
       - '.ores-otel.toml'
       - 'scripts/test_ores_otel_runtime_config.py'
+      - 'test/fixtures/ores-otel-config-v1/**'
       - '.github/workflows/ores-otel-runtime-config.yml'
   push:
     branches: [main]
     paths:
       - '.ores-otel.toml'
       - 'scripts/test_ores_otel_runtime_config.py'
+      - 'test/fixtures/ores-otel-config-v1/**'
       - '.github/workflows/ores-otel-runtime-config.yml'
   workflow_dispatch:
 
@@ -24,7 +26,7 @@ concurrency:
 jobs:
   execute-config:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Check out exact source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -32,11 +34,62 @@ jobs:
           persist-credentials: false
           show-progress: false
 
-      - name: Execute .ores-otel.toml cold-start bindings
+      - name: Verify immutable owner-authority evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+
+          root = Path('test/fixtures/ores-otel-config-v1')
+          provenance = json.loads((root / 'provenance.json').read_text())
+          if provenance['repository'] != 'ores-otel/ores-otel-interfaces':
+              raise SystemExit('unexpected OTel authority repository')
+          if provenance['revision'] != '7c806d93f10e8874ebf6690d8a163f93eb851559':
+              raise SystemExit('unexpected OTel authority revision')
+          for key, local in [('typespec', 'main.tsp'), ('jsonSchema', 'authored.schema.json')]:
+              actual = subprocess.check_output(['git', 'hash-object', str(root / local)], text=True).strip()
+              if actual != provenance[key]['gitBlob']:
+                  raise SystemExit(f'{local} differs from the pinned owner blob')
+          PY
+
+      - name: Build consumer instance from root TOML
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .tjsv-instances/OresOtelConfigV1/valid
+          python3 - <<'PY'
+          import json
+          import tomllib
+          from pathlib import Path
+          with Path('.ores-otel.toml').open('rb') as handle:
+              config = tomllib.load(handle)
+          Path('.tjsv-instances/OresOtelConfigV1/valid/lambda-template.json').write_text(
+              json.dumps(config, indent=2, sort_keys=True) + '\n'
+          )
+          PY
+
+      - name: Admit root config against owner TypeSpec and JSON Schema
+        uses: ORESoftware/typespec-json-schema-validator@93dd73cb246a09b0a1c62d7192cc62ca6ecbe405
+        with:
+          typespec: test/fixtures/ores-otel-config-v1/main.tsp
+          schema: test/fixtures/ores-otel-config-v1/authored.schema.json
+          instances: .tjsv-instances
+          report: .typespec-json-schema-validator/ores-otel-config-report.json
+          contract_ir: .typespec-json-schema-validator/ores-otel-config-contract-ir.json
+          output_dir: .typespec-json-schema-validator/generated/ores-otel-config
+          quiet: 'false'
+
+      - name: Execute owner-shaped cold-start policy
         shell: bash
         run: |
           set -euo pipefail
           python3 scripts/test_ores_otel_runtime_config.py
 
-      - name: Prove the config stayed read-only
-        run: git diff --exit-code -- .ores-otel.toml
+      - name: Prove authored config and pinned authorities stayed read-only
+        run: >-
+          git diff --exit-code --
+          .ores-otel.toml
+          test/fixtures/ores-otel-config-v1
