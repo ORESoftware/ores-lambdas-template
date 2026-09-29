@@ -12,13 +12,13 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ORESC_REV: 3d0b34bf8e93c382114bca888dbecddc32678b50
-  RUST_TOOLCHAIN: 1.95.0
+  ORESC_REV: 0785d5f82cca140bfdc5753d6995cdd7d746ddda
+  RUST_TOOLCHAIN: 1.88.0
 
 jobs:
   audit:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Check out consumer
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -48,10 +48,10 @@ jobs:
           fetch-depth: 1
           show-progress: false
 
-      - name: Install pinned Rust toolchain
-        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+      - name: Install declared MSRV toolchain
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component rustfmt clippy
 
-      - name: Build exact ores-cli candidate
+      - name: Verify exact source and focused Rust gates
         shell: bash
         run: |
           set -euo pipefail
@@ -59,17 +59,122 @@ jobs:
           test "$(git -C "$tool" rev-parse HEAD)" = "$ORESC_REV"
           test -z "$(git -C "$tool" status --porcelain)"
           export CARGO_TARGET_DIR="$RUNNER_TEMP/oresc-target"
-          cargo +"$RUST_TOOLCHAIN" build --locked --manifest-path "$tool/Cargo.toml" --bin oresc
+          (
+            cd "$tool"
+            cargo +"$RUST_TOOLCHAIN" fmt --all --check
+            cargo +"$RUST_TOOLCHAIN" test --locked --bin oresc invocation_diagnostic
+            cargo +"$RUST_TOOLCHAIN" clippy --locked --bin oresc -- -D warnings
+            cargo +"$RUST_TOOLCHAIN" build --locked --bin oresc
+          )
           install -d "$RUNNER_TEMP/oresc-bin"
           install -m 0755 "$CARGO_TARGET_DIR/debug/oresc" "$RUNNER_TEMP/oresc-bin/oresc"
           install -m 0644 "$tool/.cli-flags.toml" "$RUNNER_TEMP/oresc-bin/.cli-flags.toml"
           echo "$RUNNER_TEMP/oresc-bin" >> "$GITHUB_PATH"
           echo "FLAGS2ENV_CONFIG=$RUNNER_TEMP/oresc-bin/.cli-flags.toml" >> "$GITHUB_ENV"
           echo "FLAGS2ENV_DOTENV=0" >> "$GITHUB_ENV"
-          rm -rf "$GITHUB_WORKSPACE/.ci"
+
+      - name: Verify typo diagnostic with inline value and broken runtime contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          broken="$RUNNER_TEMP/broken-cli-flags.toml"
+          stdout="$RUNNER_TEMP/typo.stdout"
+          stderr="$RUNNER_TEMP/typo.stderr"
+          printf '%s\n' '[parse' > "$broken"
+          set +e
+          FLAGS2ENV_CONFIG="$broken" oresc \
+            org --name=litegraph --preix=ltgr list-missing-repos \
+            >"$stdout" 2>"$stderr"
+          status=$?
+          set -e
+          test "$status" -ne 0
+          test ! -s "$stdout"
+          grep -F "ores-cli runtime error: invalid invocation: flag contract audit failed; the flag '--preix' was not recognized" "$stderr"
+          grep -F 'expected: --prefix' "$stderr"
+          grep -F 'hint: did you mean `--prefix`?' "$stderr"
+          grep -F 'example: oresc org --name=<org> --prefix=<prefix> list-missing-repos' "$stderr"
+          if grep -Fq 'ltgr' "$stderr"; then
+            echo 'inline flag value leaked into diagnostic' >&2
+            exit 1
+          fi
+
+      - name: Verify separate typo value does not corrupt command diagnosis
+        shell: bash
+        run: |
+          set -euo pipefail
+          broken="$RUNNER_TEMP/broken-cli-flags.toml"
+          stderr="$RUNNER_TEMP/typo-separated.stderr"
+          set +e
+          FLAGS2ENV_CONFIG="$broken" oresc \
+            org --name litegraph --preix ltgr list-missing-repos \
+            >/dev/null 2>"$stderr"
+          status=$?
+          set -e
+          test "$status" -ne 0
+          grep -F "the flag '--preix' was not recognized" "$stderr"
+          grep -F 'example: oresc org --name=<org> --prefix=<prefix> list-missing-repos' "$stderr"
+          if grep -Fq 'ltgr' "$stderr"; then
+            echo 'separate flag value leaked into diagnostic' >&2
+            exit 1
+          fi
+
+      - name: Verify typed structured diagnostic
+        shell: bash
+        run: |
+          set -euo pipefail
+          broken="$RUNNER_TEMP/broken-cli-flags.toml"
+          stdout="$RUNNER_TEMP/json.stdout"
+          stderr="$RUNNER_TEMP/json.stderr"
+          set +e
+          FLAGS2ENV_CONFIG="$broken" oresc \
+            --json=true org --name=litegraph --preix=ltgr list-missing-repos \
+            >"$stdout" 2>"$stderr"
+          status=$?
+          set -e
+          test "$status" -ne 0
+          test ! -s "$stderr"
+          jq -e '.schema == "ores-cli/error/v1" and .ok == false and .error.kind == "unknown-option" and .error.offending == ["--preix"] and .error.expected == ["--prefix"]' "$stdout" >/dev/null
+          if grep -q $'\033' "$stdout"; then
+            echo 'structured JSON diagnostic contains ANSI' >&2
+            exit 1
+          fi
+
+      - name: Verify interactive color defaults and opt-outs
+        shell: bash
+        run: |
+          set -euo pipefail
+          broken="$RUNNER_TEMP/broken-cli-flags.toml"
+          colored="$RUNNER_TEMP/colored.typescript"
+          plain="$RUNNER_TEMP/plain.typescript"
+          no_color="$RUNNER_TEMP/no-color.typescript"
+          set +e
+          script -q -e -c "FLAGS2ENV_CONFIG='$broken' oresc org --name=litegraph --preix=ltgr list-missing-repos" "$colored"
+          colored_status=$?
+          script -q -e -c "FLAGS2ENV_CONFIG='$broken' oresc --colors=false org --name=litegraph --preix=ltgr list-missing-repos" "$plain"
+          plain_status=$?
+          script -q -e -c "NO_COLOR=1 FLAGS2ENV_CONFIG='$broken' oresc org --name=litegraph --preix=ltgr list-missing-repos" "$no_color"
+          no_color_status=$?
+          set -e
+          test "$colored_status" -ne 0
+          test "$plain_status" -ne 0
+          test "$no_color_status" -ne 0
+          grep -Fq $'\033[1;31mores-cli runtime error:\033[0m' "$colored"
+          if grep -Fq $'\033[' "$plain"; then
+            echo '--colors=false did not suppress ANSI' >&2
+            exit 1
+          fi
+          if grep -Fq $'\033[' "$no_color"; then
+            echo 'NO_COLOR did not suppress ANSI' >&2
+            exit 1
+          fi
 
       - name: Audit repository and root TOML contracts
         run: oresc --no-json audit repo
 
       - name: Audit environment declaration/reference coverage
         run: oresc --no-json audit env
+
+      - name: Remove private source checkout
+        if: always()
+        shell: bash
+        run: rm -rf "$GITHUB_WORKSPACE/.ci"
