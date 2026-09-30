@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  TJSV_REVISION: bd503465dab8c5148fee722b443ed04ff126c9bf
+  TJSV_REVISION: d776d54d7138bb199ed86d550e22b1570536f4df
   CARGO_LAMBDA_VERSION: 1.9.2
   CARGO_LAMBDA_X86_64_SHA256: b5c258c424ebaef39541c3641f33c51137ee6c426016f365628fedb2c737271d
   ZIG_VERSION: 0.13.0
@@ -60,15 +60,9 @@ jobs:
           persist-credentials: false
           show-progress: false
       - name: Enforce independent TypeSpec and JSON Schema authorities
-        uses: ORESoftware/typespec-json-schema-validator@bd503465dab8c5148fee722b443ed04ff126c9bf
-        with:
-          typespec: schema-authority/main.tsp
-          schema: schema-authority/authored.schema.json
-          report: .typespec-json-schema-validator/report.json
-          contract_ir: .typespec-json-schema-validator/contract-ir.json
-          output_dir: .typespec-json-schema-validator/generated
+        uses: ORESoftware/typespec-json-schema-validator@d776d54d7138bb199ed86d550e22b1570536f4df
       - name: Verify current Contract IR against both authorities
-        uses: ORESoftware/typespec-json-schema-validator/actions/verify-contract-ir@bd503465dab8c5148fee722b443ed04ff126c9bf
+        uses: ORESoftware/typespec-json-schema-validator/actions/verify-contract-ir@d776d54d7138bb199ed86d550e22b1570536f4df
         with:
           contract_ir: .typespec-json-schema-validator/contract-ir.json
           report: .typespec-json-schema-validator/report.json

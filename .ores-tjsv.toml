@@ -1,0 +1,16 @@
+version = 1
+default_contract = "lambda-runtime"
+
+[authority]
+typespec = "peer-authority"
+json_schema = "peer-authority"
+
+[defaults]
+report = ".typespec-json-schema-validator/report.json"
+contract_ir = ".typespec-json-schema-validator/contract-ir.json"
+output_dir = ".typespec-json-schema-validator/generated"
+
+[[contracts]]
+id = "lambda-runtime"
+typespec = "schema-authority/main.tsp"
+schema = "schema-authority/authored.schema.json"
