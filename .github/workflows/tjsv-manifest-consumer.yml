@@ -1,0 +1,61 @@
+name: TJSV consumer manifest
+
+on:
+  pull_request:
+    paths:
+      - '.ores-tjsv.toml'
+      - 'schema-authority/**'
+      - '.github/workflows/tjsv-manifest-consumer.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.ores-tjsv.toml'
+      - 'schema-authority/**'
+      - '.github/workflows/tjsv-manifest-consumer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tjsv-consumer-manifest-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  parity:
+    name: Manifest-backed peer authority admission
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Enforce independent TypeSpec and JSON Schema authorities from manifest
+        uses: ORESoftware/typespec-json-schema-validator@d776d54d7138bb199ed86d550e22b1570536f4df
+        with:
+          contract: lambda-runtime
+
+      - name: Verify current Contract IR against both authorities
+        uses: ORESoftware/typespec-json-schema-validator/actions/verify-contract-ir@d776d54d7138bb199ed86d550e22b1570536f4df
+        with:
+          contract_ir: .typespec-json-schema-validator/contract-ir.json
+          report: .typespec-json-schema-validator/report.json
+          typespec: schema-authority/main.tsp
+          schema: schema-authority/authored.schema.json
+          generated_schema: .typespec-json-schema-validator/generated/typespec.generated.schema.json
+          expected_declarations: '["Ores.LambdaRuntime.Operation","Ores.LambdaRuntime.Provider"]'
+          verification: .typespec-json-schema-validator/contract-ir-verification.json
+
+      - name: Retain manifest-backed contract evidence
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lambda-tjsv-manifest-${{ github.run_id }}
+          path: .typespec-json-schema-validator/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 30
